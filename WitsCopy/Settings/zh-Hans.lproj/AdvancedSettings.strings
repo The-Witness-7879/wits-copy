@@ -1,0 +1,6 @@
+"Title" = "高级";
+"ClearHistoryOnQuit" = "退出时清除历史记录";
+"ClearHistoryOnQuitTooltip" = "退出时清除普通历史，保留置顶和带标签的内容。";
+"ClearSystemClipboard" = "同时清除系统剪贴板";
+"ClearSystemClipboardTooltip" = "启用后，清除历史记录也会清除当前系统剪贴板。";
+"Clearing" = "清除：";

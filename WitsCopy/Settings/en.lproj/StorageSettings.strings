@@ -1,0 +1,22 @@
+"Title" = "Storage";
+"Save" = "Record:";
+"Files" = "Files";
+"Images" = "Images";
+"Text" = "Text";
+"SaveDescription" = "Checked types are added to history when copied. Unchecking stops new records; existing ones stay.";
+"Size" = "Size:";
+"SizeTooltip" = "How many ordinary items to keep. Pinned and tagged items do not count. Default: 200.";
+"SortBy" = "Sort by:";
+"LastCopiedAt" = "Time of last copy";
+"FirstCopiedAt" = "Time of first copy";
+"NumberOfCopies" = "Number of copies";
+"SortByTooltip" = "Default: Time of last copy.";
+"SaveFilesHelp" = "Record copied files, except videos. Only the path is kept; the file is not backed up.";
+"SaveImagesHelp" = "Record copied images.";
+"SaveTextHelp" = "Record copied text.";
+"SizeStepperHelp" = "Change how many history items to keep.";
+"Videos" = "Videos";
+"SaveVideosHelp" = "Record copied video files. Only the path is kept; the file is not backed up.";
+
+"HistoryUsage" = "History size:";
+"HistoryUsageDescription" = "Disk space used by WitsCopy’s history database.";

@@ -1,0 +1,25 @@
+xcuserdata/
+.DS_Store
+*.profraw
+
+# Everything under lab/ is local working state: build cache, test results,
+# the in-use app, backups, notes. Only the notes file and the smoke fixtures
+# belong to the project.
+lab/*
+!lab/LAB.md
+!lab/fixtures/
+
+# Hidden build caches and all release products stay local.
+lab/.derived*/
+lab/release-work.*/
+lab/releases/
+*.dmg
+*.delta
+*.dSYM/
+# Sparkle secrets must stay in the login Keychain, never in this tree.
+*.p8
+*.p12
+*.pem
+*.key
+private-key*
+eddsa-private*

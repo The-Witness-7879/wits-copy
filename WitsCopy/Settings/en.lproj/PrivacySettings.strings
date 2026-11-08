@@ -1,0 +1,13 @@
+"Title" = "Privacy";
+"SensitiveContent" = "Sensitive content:";
+"ProtectSensitiveContent" = "Protect sensitive content";
+"ProtectSensitiveContentDescription" = "Detected passwords, verification codes, tokens, private keys, and payment card numbers are not saved to history. Detection cannot identify every secret. Only affects content copied from now on.";
+"Applications" = "Ignore applications:";
+"AddApplication" = "Add an application";
+"RemoveApplication" = "Remove the selected application";
+"OnlyRecordListedApplications" = "Only record applications in the list";
+"ApplicationsDescription" = "When off, applications in the list are ignored. When on, only applications in the list are recorded.";
+"ApplicationImportFailed" = "Couldn’t identify the selected app.";
+"Dismiss" = "OK";
+"ApplicationImportDismissHelp" = "Dismiss this message";
+"NoApplications" = "No applications";

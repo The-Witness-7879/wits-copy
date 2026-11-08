@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+#
+# 提交前守卫。
+#
+# 存在理由：本轮调查发现 26.6GB 产物里有一部分是构建目录和结果包被误当成
+# 项目文件搬来搬去，而 .gitignore 只挡得住规则里的路径，挡不住人为放进
+# 别处的二进制。这里做最后一道拦截。
+#
+# 启用：git config core.hooksPath .githooks
+#
+# 注意：macOS 自带 bash 3.2，没有 mapfile，因此用 NUL 分隔的 read 循环。
+
+set -euo pipefail
+
+MAX_MB="${WITSCOPY_MAX_COMMIT_MB:-5}"
+MAX_BYTES=$((MAX_MB * 1024 * 1024))
+fail=0
+
+report() {
+  echo "  ✗ $1" >&2
+  fail=1
+}
+
+# 只看新增和修改，删除不拦。
+while IFS= read -r -d '' path; do
+  [ -n "$path" ] || continue
+
+  case "$path" in
+    *.app|*.app/*|*.xcresult|*.xcresult/*|*.dSYM|*.dSYM/*|*DerivedData*|*.xcarchive|*.xcarchive/*)
+      report "$path 是构建产物"
+      continue
+      ;;
+    .DS_Store|*/.DS_Store)
+      report "$path 是系统垃圾文件"
+      continue
+      ;;
+  esac
+
+  [ -f "$path" ] || continue
+  size=$(stat -f%z "$path" 2>/dev/null || echo 0)
+  if [ "$size" -gt "$MAX_BYTES" ]; then
+    report "$path 有 $((size / 1024 / 1024))MB，超过 ${MAX_MB}MB 上限"
+  fi
+done < <(git diff --cached --name-only --diff-filter=ACM -z)
+
+if [ "$fail" -ne 0 ]; then
+  cat >&2 <<'MSG'
+
+提交已拒绝。构建产物请留在 lab/ 下（.gitignore 已覆盖），
+确需提交的大文件请说明用途，否则用 WITSCOPY_MAX_COMMIT_MB 临时放宽。
+MSG
+  exit 1
+fi

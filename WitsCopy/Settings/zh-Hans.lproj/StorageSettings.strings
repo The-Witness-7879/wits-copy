@@ -1,0 +1,22 @@
+"Title" = "存储";
+"Save" = "记录：";
+"Files" = "文件";
+"Images" = "图片";
+"Text" = "文本";
+"SaveDescription" = "勾选的类型在复制时记入历史；取消后不再记录，已有记录不受影响。";
+"Size" = "数量：";
+"SizeTooltip" = "普通历史最多保留的条数，置顶和带标签的内容不计在内。默认：200。";
+"SortBy" = "排序方式：";
+"LastCopiedAt" = "上次复制时间";
+"FirstCopiedAt" = "首次复制时间";
+"NumberOfCopies" = "复制次数";
+"SortByTooltip" = "默认：上次复制时间。";
+"SaveFilesHelp" = "记录复制的文件（不含视频）。只保存路径，不备份文件。";
+"SaveImagesHelp" = "记录复制的图片。";
+"SaveTextHelp" = "记录复制的文本。";
+"SizeStepperHelp" = "调整保留的历史条数。";
+"Videos" = "视频";
+"SaveVideosHelp" = "记录复制的视频文件。只保存路径，不备份文件。";
+
+"HistoryUsage" = "历史占用：";
+"HistoryUsageDescription" = "WitsCopy 历史数据库占用的磁盘空间。";

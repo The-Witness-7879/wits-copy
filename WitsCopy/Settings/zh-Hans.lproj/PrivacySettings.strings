@@ -1,0 +1,13 @@
+"Title" = "隐私";
+"SensitiveContent" = "敏感内容：";
+"ProtectSensitiveContent" = "保护敏感内容";
+"ProtectSensitiveContentDescription" = "识别到的密码、验证码、令牌、私钥和支付卡号不会存入历史，无法保证识别全部敏感内容。仅影响之后复制的内容。";
+"Applications" = "忽略应用：";
+"AddApplication" = "添加应用";
+"RemoveApplication" = "删除所选应用";
+"OnlyRecordListedApplications" = "仅记录列表中的应用";
+"ApplicationsDescription" = "关闭时，列表中的应用不会被记录；开启时，只记录列表中的应用。";
+"ApplicationImportFailed" = "无法识别所选应用。";
+"Dismiss" = "好";
+"ApplicationImportDismissHelp" = "关闭提示";
+"NoApplications" = "未添加应用";

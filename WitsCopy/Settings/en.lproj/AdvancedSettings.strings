@@ -1,0 +1,6 @@
+"Title" = "Advanced";
+"ClearHistoryOnQuit" = "Clear history on quit";
+"ClearHistoryOnQuitTooltip" = "Clear ordinary history on quit. Pinned and tagged items are kept.";
+"ClearSystemClipboard" = "Clear the system clipboard too";
+"ClearSystemClipboardTooltip" = "When enabled, clearing the history would also clear the current system clipboard.";
+"Clearing" = "Clearing:";
