@@ -472,7 +472,7 @@ final class ProductButtonCopyTests: XCTestCase {
     var confirmationRoles: [String] = []
     var alertButtons: [String] = []
     var systemWindowButtons: [String] = []
-    let wrappers = ["railButton(", "WorkspaceRailTagButton(", "WorkspaceOptionsButton("]
+    let wrappers = ["railButton(", "WorkspaceRailTagButton(", "WorkspaceOptionsButton(", "symbolButton("]
     for url in files {
       let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
       let rel = url.path.replacingOccurrences(of: root.deletingLastPathComponent().path + "/", with: "")

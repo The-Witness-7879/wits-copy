@@ -100,9 +100,13 @@
 		F11E00022F11020000A11CE3 /* RefinementContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11E00012F11020000A11CE3 /* RefinementContracts.swift */; };
 		F11E00042F11020000A11CE3 /* RefinementUIContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11E00032F11020000A11CE3 /* RefinementUIContractTests.swift */; };
 		F11E00122F11020000A11CE4 /* WorkspaceTagDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11E00112F11020000A11CE4 /* WorkspaceTagDirectory.swift */; };
+		57C120000000000000000004 /* WorkspaceTagViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57C120000000000000000003 /* WorkspaceTagViews.swift */; };
+		57C120000000000000000002 /* WorkspaceTagAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57C120000000000000000001 /* WorkspaceTagAppearance.swift */; };
 		F11E00142F11020000A11CE4 /* WorkspaceTagRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11E00132F11020000A11CE4 /* WorkspaceTagRail.swift */; };
 		F11E00162F11020000A11CE4 /* RichTextEdit.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11E00152F11020000A11CE4 /* RichTextEdit.swift */; };
 		F11E00182F11020000A11CE4 /* WorkspaceTagDirectoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11E00172F11020000A11CE4 /* WorkspaceTagDirectoryTests.swift */; };
+		57C120000000000000000006 /* WorkspaceTagAppearanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57C120000000000000000005 /* WorkspaceTagAppearanceTests.swift */; };
+		57C120000000000000000008 /* WorkspaceTagUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57C120000000000000000007 /* WorkspaceTagUITests.swift */; };
 		F11E001A2F11020000A11CE4 /* RichTextEditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11E00192F11020000A11CE4 /* RichTextEditTests.swift */; };
 		F11E001C2F11020000A11CE4 /* PasteIntentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11E001B2F11020000A11CE4 /* PasteIntentTests.swift */; };
 		F11E00212F11020000A11CE5 /* PinRecordingLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11E00202F11020000A11CE5 /* PinRecordingLifecycleTests.swift */; };
@@ -293,9 +297,13 @@
 		F11E00012F11020000A11CE3 /* RefinementContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefinementContracts.swift; sourceTree = "<group>"; };
 		F11E00032F11020000A11CE3 /* RefinementUIContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefinementUIContractTests.swift; sourceTree = "<group>"; };
 		F11E00112F11020000A11CE4 /* WorkspaceTagDirectory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTagDirectory.swift; sourceTree = "<group>"; };
+		57C120000000000000000003 /* WorkspaceTagViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTagViews.swift; sourceTree = "<group>"; };
+		57C120000000000000000001 /* WorkspaceTagAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTagAppearance.swift; sourceTree = "<group>"; };
 		F11E00132F11020000A11CE4 /* WorkspaceTagRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTagRail.swift; sourceTree = "<group>"; };
 		F11E00152F11020000A11CE4 /* RichTextEdit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RichTextEdit.swift; sourceTree = "<group>"; };
 		F11E00172F11020000A11CE4 /* WorkspaceTagDirectoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTagDirectoryTests.swift; sourceTree = "<group>"; };
+		57C120000000000000000005 /* WorkspaceTagAppearanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTagAppearanceTests.swift; sourceTree = "<group>"; };
+		57C120000000000000000007 /* WorkspaceTagUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTagUITests.swift; sourceTree = "<group>"; };
 		F11E00192F11020000A11CE4 /* RichTextEditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RichTextEditTests.swift; sourceTree = "<group>"; };
 		F11E001B2F11020000A11CE4 /* PasteIntentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteIntentTests.swift; sourceTree = "<group>"; };
 		F11E00202F11020000A11CE5 /* PinRecordingLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinRecordingLifecycleTests.swift; sourceTree = "<group>"; };
@@ -537,6 +545,8 @@
 				E1D0C0242F10260000A11CE2 /* PreviewEditContractTests.swift */,
 				F11E00032F11020000A11CE3 /* RefinementUIContractTests.swift */,
 				F11E00172F11020000A11CE4 /* WorkspaceTagDirectoryTests.swift */,
+				57C120000000000000000005 /* WorkspaceTagAppearanceTests.swift */,
+				57C120000000000000000007 /* WorkspaceTagUITests.swift */,
 				F11E00192F11020000A11CE4 /* RichTextEditTests.swift */,
 				F11E001B2F11020000A11CE4 /* PasteIntentTests.swift */,
 				F11E00202F11020000A11CE5 /* PinRecordingLifecycleTests.swift */,
@@ -666,6 +676,8 @@
 				C0FFEE0000000000000000C1 /* LabSmokeCanvas.swift */,
 				F11E00012F11020000A11CE3 /* RefinementContracts.swift */,
 				F11E00112F11020000A11CE4 /* WorkspaceTagDirectory.swift */,
+				57C120000000000000000003 /* WorkspaceTagViews.swift */,
+				57C120000000000000000001 /* WorkspaceTagAppearance.swift */,
 				F11E00132F11020000A11CE4 /* WorkspaceTagRail.swift */,
 				DA81D673252A056B009977BC /* Throttler.swift */,
 				DAB8CE4024E3677F00A2500E /* WitsCopy.entitlements */,
@@ -874,6 +886,8 @@
 				E1D0C0252F10260000A11CE2 /* PreviewEditContractTests.swift in Sources */,
 				F11E00042F11020000A11CE3 /* RefinementUIContractTests.swift in Sources */,
 				F11E00182F11020000A11CE4 /* WorkspaceTagDirectoryTests.swift in Sources */,
+				57C120000000000000000006 /* WorkspaceTagAppearanceTests.swift in Sources */,
+				57C120000000000000000008 /* WorkspaceTagUITests.swift in Sources */,
 				F11E001A2F11020000A11CE4 /* RichTextEditTests.swift in Sources */,
 				F11E001C2F11020000A11CE4 /* PasteIntentTests.swift in Sources */,
 				F11E00212F11020000A11CE5 /* PinRecordingLifecycleTests.swift in Sources */,
@@ -902,6 +916,8 @@
 				C0FFEE0000000000000000C2 /* LabSmokeCanvas.swift in Sources */,
 				F11E00022F11020000A11CE3 /* RefinementContracts.swift in Sources */,
 				F11E00122F11020000A11CE4 /* WorkspaceTagDirectory.swift in Sources */,
+				57C120000000000000000004 /* WorkspaceTagViews.swift in Sources */,
+				57C120000000000000000002 /* WorkspaceTagAppearance.swift in Sources */,
 				F11E00142F11020000A11CE4 /* WorkspaceTagRail.swift in Sources */,
 				F11E00162F11020000A11CE4 /* RichTextEdit.swift in Sources */,
 				2F0EC7812E773F1D003E2EA9 /* PasteStack.swift in Sources */,
@@ -1318,7 +1334,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2026110908;
+				CURRENT_PROJECT_VERSION = 2026110915;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = MN3X4648SC;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1333,7 +1349,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = local.thewitness.WitsCopy;
 				PRODUCT_NAME = WitsCopy;
 				PRODUCT_MODULE_NAME = WitsCopy;
@@ -1354,7 +1370,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2026110908;
+				CURRENT_PROJECT_VERSION = 2026110915;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = MN3X4648SC;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1369,7 +1385,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = local.thewitness.WitsCopy;
 				PRODUCT_NAME = WitsCopy;
 				PRODUCT_MODULE_NAME = WitsCopy;

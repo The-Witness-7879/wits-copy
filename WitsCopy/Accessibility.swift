@@ -30,33 +30,14 @@ struct Accessibility {
     URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
   }
 
-  /// The name the Accessibility list shows for this build.
-  ///
-  /// The list is keyed by the *executable* name, and several builds can share it:
-  /// a lab copy and the installed copy both show up as "WitsCopy". Reading the name
-  /// from the bundle keeps the prompt honest instead of naming a build the user
-  /// may not be running.
-  static var listedExecutableName: String {
-    (Bundle.main.object(forInfoDictionaryKey: "CFBundleExecutable") as? String)
-      ?? ProcessInfo.processInfo.processName
-  }
-
-  /// Display name, falling back to the executable name.
+  /// The name shown in the Accessibility list.
   static var displayName: String {
-    if let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String,
-       !name.isEmpty {
-      return name
+    for key in ["CFBundleDisplayName", "CFBundleName"] {
+      if let name = Bundle.main.object(forInfoDictionaryKey: key) as? String, !name.isEmpty {
+        return name
+      }
     }
-    if let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String,
-       !name.isEmpty {
-      return name
-    }
-    return listedExecutableName
-  }
-
-  /// Full bundle path, so a same-named entry in the list can be told apart.
-  static var bundlePath: String {
-    Bundle.main.bundlePath
+    return ProcessInfo.processInfo.processName
   }
 
   /// Ask the system first, then land the user on the exact switch to flip.
@@ -77,15 +58,9 @@ struct PasteFailureCopy: Equatable {
     switch failure {
     case .accessibilityDenied:
       title = NSLocalizedString("paste_accessibility_denied", comment: "")
-      let detail = String(
-        format: NSLocalizedString("paste_permission_alert_detail", comment: ""),
-        Accessibility.listedExecutableName,
-        Accessibility.bundlePath
-      )
       message = String(
         format: NSLocalizedString("paste_permission_alert_body", comment: ""),
-        Accessibility.displayName,
-        detail
+        Accessibility.displayName
       )
     case .noTarget:
       title = NSLocalizedString("paste_no_target", comment: "")

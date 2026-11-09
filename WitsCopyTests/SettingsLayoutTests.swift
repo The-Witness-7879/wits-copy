@@ -187,4 +187,40 @@ final class SettingsLayoutTests: XCTestCase {
     XCTAssertTrue(app.contains("guard !about.isVisible, settingsWindowController?.window?.isVisible != true"),
                   "the panel returns only when neither settings nor about is open")
   }
+
+  /// Esc closes secondary windows when nothing is editing.
+  @MainActor
+  func testEscClosesSettingsAndAbout() throws {
+    for window in [
+      EscapeClosingWindow(contentRect: NSRect(x: -24000, y: -24000, width: 200, height: 100),
+                          styleMask: [.titled, .closable], backing: .buffered, defer: false),
+      AboutPanel(contentRect: NSRect(x: -24000, y: -24000, width: 200, height: 100),
+                 styleMask: [.titled, .closable], backing: .buffered, defer: false)
+    ] as [NSWindow] {
+      window.isReleasedWhenClosed = false
+      window.orderFront(nil)
+      XCTAssertTrue(window.isVisible)
+      window.cancelOperation(nil)
+      XCTAssertFalse(window.isVisible, "\(type(of: window)) did not close on Esc")
+    }
+    let settings = LabSettingsWindowController().prepareWindow()
+    XCTAssertTrue(settings is EscapeClosingWindow)
+  }
+
+  /// Only a drag that starts inside a tag dissolves when dropped outside;
+  /// from "All" the ghost slides back and nothing changes.
+  func testDragOutRemovesOnlyFromATag() {
+    let source = WorkspaceItemDragSource()
+    let image = NSImage(size: WorkspaceItemDrag.suggestedGhostSize)
+    for removable in [true, false] {
+      source.prepare(itemID: UUID(), window: nil, image: image, removesOnDropOutside: removable)
+      XCTAssertEqual(source.slidesBackOnCancel, !removable)
+    }
+  }
+
+  func testPermissionCopyIsShortAndHasNoPaths() {
+    let message = PasteFailureCopy(.accessibilityDenied).message
+    XCTAssertFalse(message.contains("/"))
+    XCTAssertLessThan(message.count, 140)
+  }
 }

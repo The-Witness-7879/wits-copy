@@ -1255,6 +1255,48 @@ final class PreviewRecognitionTicket: @unchecked Sendable {
 }
 
 enum PreviewRecognizer {
+  private static let prewarmLock = NSLock()
+  private static var prewarmed = false
+
+  /// 打开图片预览时调用一次。系统识别模型首次使用要先加载（实测冷态可达二十多秒），
+  /// 提前在后台用一张带字的小图跑一遍，用户点「识别文字」时就不用再等。
+  /// 每个进程只做一次；不读用户内容，不写任何状态，结果丢弃。
+  static func prewarm() {
+    prewarmLock.lock()
+    let first = !prewarmed
+    prewarmed = true
+    prewarmLock.unlock()
+    guard first else { return }
+    DispatchQueue.global(qos: .utility).async {
+      guard let image = prewarmImage() else { return }
+      let request = VNRecognizeTextRequest()
+      request.recognitionLevel = .accurate
+      request.usesLanguageCorrection = true
+      request.automaticallyDetectsLanguage = true
+      request.recognitionLanguages = recognitionLanguages()
+      try? VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+    }
+  }
+
+  /// 有文字的小图：空白图可能在检测阶段就结束，触发不到识别模型的加载。
+  private static func prewarmImage() -> CGImage? {
+    let size = NSSize(width: 160, height: 40)
+    guard let rep = NSBitmapImageRep(
+      bitmapDataPlanes: nil, pixelsWide: Int(size.width), pixelsHigh: Int(size.height),
+      bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+      colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+    ), let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = context
+    NSColor.white.setFill()
+    NSRect(origin: .zero, size: size).fill()
+    ("Aa 文字 123" as NSString).draw(at: NSPoint(x: 8, y: 8), withAttributes: [
+      .font: NSFont.systemFont(ofSize: 20), .foregroundColor: NSColor.black
+    ])
+    NSGraphicsContext.restoreGraphicsState()
+    return rep.cgImage
+  }
+
   static func recognitionLanguages() -> [String] {
     let probe = VNRecognizeTextRequest()
     let supported = (try? probe.supportedRecognitionLanguages()) ?? ["en-US"]

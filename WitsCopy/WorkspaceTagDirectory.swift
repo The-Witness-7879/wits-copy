@@ -115,9 +115,12 @@ enum WorkspaceRailMetrics {
   static let growth: CGFloat = 1.25
   static var hit: CGFloat { baselineHit * growth }
   static var cornerRadius: CGFloat { 6 * growth }
-  /// 选中底色离窗体左右各 4pt；行内 6pt 让 16pt 图标槽在收缩态的正中
-  /// （行宽 28，左右各 6），展开态也沿用同一个值，图标不因换档而横移。
-  static let railGutter: CGFloat = 4
+  /// 选中底色离窗体左缘 8pt，与关闭按钮同一条左边线；右侧不再留白，
+  /// 条目列自带的 8pt 就是行与条目之间的间距，左右两边因此一样宽。
+  /// 行内 6pt 让 16pt 图标槽在收缩态的正中（行宽 28，左右各 6），
+  /// 展开态也沿用同一个值，图标不因换档而横移。
+  static let railLeading: CGFloat = WorkspaceInsets.outer
+  static let railTrailing: CGFloat = 0
   static let leadingInset: CGFloat = 6
 }
 
@@ -276,6 +279,7 @@ enum WorkspaceTagDirectoryActions {
   static func rename(
     from: String,
     to: String,
+    merging: Bool = false,
     itemTagsAfter: () -> [String],
     renameHistory: () -> Bool,
     rollbackHistory: (_ restoredName: String) -> Bool,
@@ -292,6 +296,14 @@ enum WorkspaceTagDirectoryActions {
       _ = rollbackHistory(from)
       return .failure(.persistFailed)
     }
+    // 重命名到已有分类也会合并；和显式合并一样，保留目标外观。
+    let targetExisted = HistoryItem.normalizedTag(to).map { target in
+      stored.contains { $0.caseInsensitiveCompare(target) == .orderedSame && $0.caseInsensitiveCompare(from) != .orderedSame }
+    } ?? false
+    // 历史与目录都已成功，才迁移外观；任何失败路径保留原覆写。
+    let styles = Defaults[.workspaceTagStyles]
+    let nextStyles = WorkspaceTagAppearance.renaming(styles, from: from, to: to, merging: merging || targetExisted)
+    if nextStyles != styles { Defaults[.workspaceTagStyles] = nextStyles }
     return .success(())
   }
 
@@ -316,6 +328,7 @@ enum WorkspaceTagDirectoryActions {
       }
       return .failure(.historyFailed)
     }
+    Defaults[.workspaceTagStyles] = WorkspaceTagAppearance.removing(Defaults[.workspaceTagStyles], named: name)
     return .success(())
   }
 }
@@ -348,7 +361,7 @@ enum WorkspaceItemDrag {
   /// Not `public.utf8-plain-text`. External text cannot satisfy this type.
   static let typeIdentifier = "local.thewitness.WitsCopy.history-item"
   static var pasteboardType: NSPasteboard.PasteboardType { NSPasteboard.PasteboardType(typeIdentifier) }
-  static let suggestedGhostSize = NSSize(width: 180, height: 32)
+  static let suggestedGhostSize = NSSize(width: 220, height: 30)
 
   static func encode(_ itemID: UUID) -> Data {
     Data(itemID.uuidString.utf8)
@@ -391,24 +404,41 @@ enum WorkspaceItemDrag {
   }
 
   /// Native drag image. Do not use the pasteboard payload or a decoded preview as the ghost.
+  /// Drawn in the panel's own language: a translucent rounded plate like the
+  /// row highlight, a hairline edge, secondary icon, label in the row font.
+  /// Call inside the source view's drawing appearance so light and dark match.
   static func draggingImage(title: String) -> NSImage {
     let size = suggestedGhostSize
     let image = NSImage(size: size)
     image.lockFocus()
-    NSColor.windowBackgroundColor.withAlphaComponent(0.94).setFill()
     let rect = NSRect(origin: .zero, size: size).insetBy(dx: 0.5, dy: 0.5)
-    let path = NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6)
+    let path = NSBezierPath(roundedRect: rect, xRadius: Popup.cornerRadius, yRadius: Popup.cornerRadius)
+    NSColor.windowBackgroundColor.withAlphaComponent(0.82).setFill()
     path.fill()
-    NSColor.separatorColor.setStroke()
+    NSColor.labelColor.withAlphaComponent(0.06).setFill()
+    path.fill()
+    NSColor.labelColor.withAlphaComponent(0.14).setStroke()
+    path.lineWidth = 1
     path.stroke()
-    let symbol = NSImage(systemSymbolName: "tag", accessibilityDescription: nil)
-    symbol?.draw(in: NSRect(x: 8, y: 8, width: 16, height: 16))
-    let label = title.isEmpty ? WorkspaceTagCopy.text("tag_drop_ghost") : String(title.prefix(40))
+    let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
+      .applying(.init(hierarchicalColor: .secondaryLabelColor))
+    let symbol = NSImage(systemSymbolName: "doc.on.clipboard", accessibilityDescription: nil)?
+      .withSymbolConfiguration(config)
+    let symbolSize = symbol?.size ?? .zero
+    symbol?.draw(in: NSRect(
+      x: 10, y: (size.height - symbolSize.height) / 2,
+      width: symbolSize.width, height: symbolSize.height
+    ))
+    let label = title.isEmpty ? WorkspaceTagCopy.text("tag_drop_ghost") : String(title.prefix(60))
+    let style = NSMutableParagraphStyle()
+    style.lineBreakMode = .byTruncatingTail
     let string = NSAttributedString(string: label, attributes: [
       .font: NSFont.systemFont(ofSize: 12),
-      .foregroundColor: NSColor.labelColor
+      .foregroundColor: NSColor.labelColor,
+      .paragraphStyle: style
     ])
-    string.draw(in: NSRect(x: 30, y: 8, width: size.width - 38, height: 16))
+    let textHeight = string.size().height
+    string.draw(in: NSRect(x: 30, y: (size.height - textHeight) / 2, width: size.width - 40, height: textHeight))
     image.unlockFocus()
     return image
   }

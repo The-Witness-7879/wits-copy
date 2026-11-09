@@ -186,6 +186,7 @@ final class PreviewModel {
     guard session.isCurrent(token), !Task.isCancelled else { return }
     imageData = prepared.data
     pixelSize = prepared.pixelSize ?? pixelSize
+    if prepared.data != nil { PreviewRecognizer.prewarm() }
     if let cg = prepared.image {
       staticImage = NSImage(cgImage: cg, size: pointSize(prepared.pixelSize))
     } else {
@@ -203,6 +204,7 @@ final class PreviewModel {
     guard let data = prepared.data, session.isCurrent(token), !Task.isCancelled else { return }
     imageData = data
     pixelSize = prepared.pixelSize ?? pixelSize
+    PreviewRecognizer.prewarm()
     let metrics = session.metrics
     let plan: GIFPlaybackPlan
     do {
@@ -857,32 +859,18 @@ struct PreviewCornerActions: View {
       )
     }
     .fixedSize()
-    .padding(6)
-    .background {
-      RoundedRectangle(cornerRadius: 8, style: .continuous)
-        .fill(.regularMaterial)
-        .allowsHitTesting(false)
-    }
+    // 不垫底色：标签胶囊和垃圾桶与预览里其他图标一样直接落在面板上。
     .accessibilityElement(children: .contain)
   }
 
   /// 标签是元数据：这里只展示，不做编辑。
   /// 行菜单和预览工具栏已经能改标签，这里再放一个入口只会让人以为有两套。
-  /// 底色用分类自己的颜色，和左栏、和行内圆点是同一套。
+  /// 与侧栏和列表共用同一个标签外观。
   @ViewBuilder
   private var tagBadge: some View {
     if let category = item.item.tags.first {
-      let color = Color(nsColor: WorkspaceTagDot.color(for: category))
-      Text(category)
-        .font(.caption2)
-        .foregroundStyle(color)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 2)
-        .background {
-          Capsule().fill(color.opacity(0.18))
-        }
+      WorkspaceTagBadge(tag: category)
         .accessibilityIdentifier("lab-preview-tag-badge")
-        .accessibilityLabel(Text(category))
     }
   }
 

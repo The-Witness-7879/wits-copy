@@ -612,7 +612,9 @@ class HistoryTests: XCTestCase {
       XCTAssertFalse(copy.message.isEmpty)
       XCTAssertNotEqual(copy.title, copy.message, "title and message must not repeat each other")
     }
-    XCTAssertTrue(PasteFailureCopy(.accessibilityDenied).message.contains(Accessibility.bundlePath))
+    let denied = PasteFailureCopy(.accessibilityDenied).message
+    XCTAssertTrue(denied.contains(Accessibility.displayName))
+    XCTAssertFalse(denied.contains("/"), "no file paths in user-facing copy")
   }
 
   func testTagCreateErrorGrowsTheFormAndReportsTheSize() {
@@ -2642,9 +2644,12 @@ final class PreviewViewportLayoutTests: XCTestCase {
     // 图钉与快捷键是同级按钮：相邻，只留 pinShortcutGap。
     XCTAssertLessThanOrEqual(narrowPin.maxX, narrow.shortcuts.minX + 1)
     XCTAssertEqual(narrow.shortcuts.minX - narrowPin.maxX, HistoryRowMetrics.pinShortcutGap, accuracy: 1.5)
-    XCTAssertEqual(narrow.preview.height, HistoryRowMetrics.contentHeight, accuracy: 2,
-                   "default history row content is not the slightly taller slot")
-    XCTAssertEqual(emptyShortcut.preview.height, narrow.preview.height, accuracy: 1, "text and image slots differ")
+    XCTAssertEqual(narrow.shortcuts.height, HistoryRowMetrics.contentHeight, accuracy: 2,
+                   "the whole row must keep its fixed height")
+    XCTAssertEqual(narrow.preview.height, HistoryRowMetrics.thumbnailHeight, accuracy: 2,
+                   "image rows reserve the metadata line inside the existing row height")
+    XCTAssertEqual(emptyShortcut.preview.height, HistoryRowMetrics.contentHeight, accuracy: 1)
+    XCTAssertNotNil(narrow.sourceBox, "image rows must keep their tag/source metadata")
     XCTAssertGreaterThan(narrow.preview.width, 120, "center slot is still a decorative thumbnail")
     XCTAssertTrue(narrow.texts.contains { $0.contains("slot-pinned") }, "image alias is not readable in the row")
     XCTAssertTrue(emptyShortcut.texts.contains { $0.contains("second line") }, "text row does not show a useful excerpt")
@@ -2728,9 +2733,10 @@ final class PreviewViewportLayoutTests: XCTestCase {
     let tallItem = imageItem(pixels: NSSize(width: 40, height: 200), title: "")
     let tall = history.add(tallItem)
     tall.thumbnailImage = try XCTUnwrap(NSImage(data: LabSmokeCanvas.png(pixels: NSSize(width: 40, height: 200)) ?? Data()))
-    let wideItem = imageItem(pixels: NSSize(width: 200, height: 40), title: "")
+    // 元信息占用底部 18pt 后，横图样本仍需真正落在缩略图槽内，才能检测“不该淡出”。
+    let wideItem = imageItem(pixels: NSSize(width: 320, height: 40), title: "")
     let wide = history.add(wideItem)
-    wide.thumbnailImage = try XCTUnwrap(NSImage(data: LabSmokeCanvas.png(pixels: NSSize(width: 200, height: 40)) ?? Data()))
+    wide.thumbnailImage = try XCTUnwrap(NSImage(data: LabSmokeCanvas.png(pixels: NSSize(width: 320, height: 40)) ?? Data()))
     let namedItem = imageItem(pixels: NSSize(width: 80, height: 80), title: "visible-alias")
     let named = history.add(namedItem)
     named.thumbnailImage = try XCTUnwrap(namedItem.image)
@@ -2746,7 +2752,8 @@ final class PreviewViewportLayoutTests: XCTestCase {
     let namedMeasured = await mountedRowSlots(named, width: 360)
     let namedSlots = try XCTUnwrap(namedMeasured)
     XCTAssertEqual(tallSlots.preview.height, wideSlots.preview.height, accuracy: 1)
-    XCTAssertEqual(tallSlots.preview.height, HistoryRowMetrics.contentHeight, accuracy: 2)
+    XCTAssertEqual(tallSlots.preview.height, HistoryRowMetrics.thumbnailHeight, accuracy: 2)
+    XCTAssertEqual(tallSlots.shortcuts.height, HistoryRowMetrics.contentHeight, accuracy: 2)
     let tallAspect = 200.0 / 40.0
     let unboundedTall = tallSlots.preview.width * tallAspect
     XCTAssertGreaterThan(unboundedTall, tallSlots.preview.height + 24, "portrait fixture does not overflow the slot")

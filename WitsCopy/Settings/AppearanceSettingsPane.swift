@@ -134,7 +134,7 @@ struct AppearanceSettingsPane: View {
 
       // The status bar item.
       SettingsLayout.row("MenuBar", table: "AppearanceSettings") {
-        HStack(spacing: 8) {
+        SettingsLayout.inlineCheckboxLine {
           Defaults.Toggle(key: .showInStatusBar) {
             Text("ShowMenuIcon", tableName: "AppearanceSettings")
           }
@@ -144,6 +144,7 @@ struct AppearanceSettingsPane: View {
             }
           }
           .labelsHidden()
+          .controlSize(.small)
           .fixedSize()
           .disabled(!showInStatusBar)
         }

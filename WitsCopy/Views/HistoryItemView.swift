@@ -108,8 +108,6 @@ struct HistoryItemView: View {
 
       }
 
-      // 分类不再在标题下方排一行带字的胶囊：
-      // 它现在是左侧来源图标下方的那个颜色圆点，和左栏同一个颜色。
     }
     .padding(.vertical, inset)
     .fixedSize(horizontal: false, vertical: true)
@@ -334,14 +332,7 @@ private struct FlexibleTagRow: View {
           Button {
             action(tag)
           } label: {
-            Text(tag)
-              .font(.caption)
-              .padding(.horizontal, 6)
-              .padding(.vertical, 2)
-              .background(
-                Color(nsColor: .controlAccentColor).opacity(0.28),
-                in: Capsule()
-              )
+            WorkspaceTagBadge(tag: tag)
           }
           .buttonStyle(.plain)
           .iconHelp(NSLocalizedString(

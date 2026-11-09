@@ -21,6 +21,12 @@ enum SettingsLayout {
   static let rowSpacing: CGFloat = 12
   /// Space between stacked controls inside one row.
   static let controlSpacing: CGFloat = 6
+  /// Height of every single-line control (pop-up, stepper, number field,
+  /// shortcut recorder). Fields used to be 22pt beside 24pt pop-ups and
+  /// steppers, so gaps around them came out 1–2pt larger.
+  static let controlHeight: CGFloat = 24
+  /// Layout height of one checkbox line.
+  static let checkboxLineHeight: CGFloat = 16
   /// Every pop-up menu in the settings window shares this width so their right
   /// edges line up instead of following each selection's text.
   static let pickerWidth: CGFloat = 160
@@ -83,6 +89,14 @@ enum SettingsLayout {
     content().padding(.leading, dependentIndent)
   }
 
+  /// A checkbox with a button or pop-up beside it. The line keeps a checkbox's
+  /// layout height and lets the taller control overhang equally above and
+  /// below, so the checkboxes in a stack stay on one pitch.
+  static func inlineCheckboxLine<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    HStack(spacing: 8) { content() }
+      .frame(height: checkboxLineHeight, alignment: .leading)
+  }
+
   /// Secondary text under a control. `underCheckbox` lines it up with the
   /// checkbox title instead of the box, as macOS does for a single checkbox.
   static func description(_ key: String, table: String, underCheckbox: Bool = false) -> some View {
@@ -139,8 +153,10 @@ struct SettingsNumberField: View {
   var body: some View {
     TextField("", value: $value, formatter: formatter)
       .multilineTextAlignment(.trailing)
-      .glassTextField()
-      .frame(width: SettingsLayout.numberFieldWidth)
+      .textFieldStyle(.plain)
+      .padding(.horizontal, GlassField.horizontalPadding)
+      .frame(width: SettingsLayout.numberFieldWidth, height: SettingsLayout.controlHeight)
+      .glassFieldChrome()
   }
 }
 
@@ -153,7 +169,7 @@ struct SettingsShortcutRecorder: View {
 
   var body: some View {
     Representable(name: name, onChange: onChange)
-      .frame(width: 140, height: GlassField.height)
+      .frame(width: 140, height: SettingsLayout.controlHeight)
       .glassFieldChrome()
   }
 

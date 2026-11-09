@@ -413,12 +413,10 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKey
     if mayRead, !Accessibility.isTrusted {
       pasteFocus = nil
       pasteFocusAvailability = .untrusted
-      // 诊断用：区分「权限确实没给」和「给了但 app 判断错」。
-      // 用 log show --predicate 'process == "WitsCopy"' 可看到这行。
+      // Diagnostics: `log show --predicate 'process == "WitsCopy"'`.
       NSLog(
-        "[WitsCopy] accessibility untrusted bundle=%@ path=%@",
-        Bundle.main.bundleIdentifier ?? "?",
-        Bundle.main.bundlePath
+        "[WitsCopy] accessibility untrusted bundle=%@",
+        Bundle.main.bundleIdentifier ?? "?"
       )
       return
     }
@@ -550,6 +548,7 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKey
   /// `windowWillResize`, and `inLiveResize` stays false, so the list kept its
   /// old fixed width and NSHostingView snapped the window back to it.
   func windowDidResize(_ notification: Notification) {
+    alignTrafficLight()
     guard !isSyncingSplit else { return }
     guard AppState.shared.appDelegate?.panel === self else { return }
     let previous = lastLiveFrame
@@ -760,6 +759,32 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKey
   // green button must not zoom or minimize it.
   override func zoom(_ sender: Any?) {}
   override func miniaturize(_ sender: Any?) {}
+
+  /// The title bar re-lays out its buttons on resize, key changes and
+  /// appearance changes, so re-apply the position after every window layout.
+  override func layoutIfNeeded() {
+    super.layoutIfNeeded()
+    alignTrafficLight()
+  }
+
+  /// Centre the close button on the search/tool row instead of the system's
+  /// 28pt title bar, and on the rail's icon column (row inset + icon inset +
+  /// half the 16pt slot), so it sits on the same vertical line as the icons
+  /// below it in both rail widths.
+  private func alignTrafficLight() {
+    guard let close = standardWindowButton(.closeButton), let bar = close.superview else { return }
+    let size = close.frame.size
+    let centerFromTop = WorkspaceInsets.headerTop + WorkspaceInsets.toolBand / 2
+    let fromTop = centerFromTop - size.height / 2
+    let y = bar.isFlipped ? fromTop : bar.bounds.height - fromTop - size.height
+    let iconCenter = WorkspaceRailMetrics.railLeading + WorkspaceRailMetrics.leadingInset + 8
+    let currentMinX = close.convert(close.bounds, to: nil).minX
+    let x = close.frame.origin.x + (iconCenter - size.width / 2 - currentMinX)
+    let origin = NSPoint(x: x, y: y)
+    if close.frame.origin != origin {
+      close.setFrameOrigin(origin)
+    }
+  }
 
   // Allow text inputs inside the panel to receive focus only after an explicit
   // editor click. Show, browsing, and row selection must not take the insertion point.

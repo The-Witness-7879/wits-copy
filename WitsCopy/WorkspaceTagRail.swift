@@ -2,14 +2,29 @@ import AppKit
 import SwiftUI
 
 /// List rows should start a drag with this source. `.copy` keeps the row; do not delete it when the drag ends.
+///
+/// Dragging out of the window only means something inside a tag: it takes the
+/// item out of that tag. In "All" there is nothing to take it out of, so the
+/// ghost slides back and nothing changes. A drag never deletes an item.
 final class WorkspaceItemDragSource: NSObject, NSDraggingSource {
   private var pendingItemID: UUID?
+  private var pendingImage: NSImage?
+  private var removesOnDropOutside = false
   private weak var sourceWindow: NSWindow?
 
-  /// 记住这次拖的是哪一条、从哪个窗口出发。
-  func prepare(itemID: UUID, window: NSWindow?) {
+  /// 记住这次拖的是哪一条、从哪个窗口出发、拖出窗外是否会移出分类。
+  func prepare(itemID: UUID, window: NSWindow?, image: NSImage, removesOnDropOutside: Bool) {
     pendingItemID = itemID
+    pendingImage = image
     sourceWindow = window
+    self.removesOnDropOutside = removesOnDropOutside
+  }
+
+  /// Only a removable drag skips the slide-back; its ending is the dissolve.
+  var slidesBackOnCancel: Bool { !removesOnDropOutside }
+
+  func draggingSession(_ session: NSDraggingSession, willBeginAt screenPoint: NSPoint) {
+    session.animatesToStartingPositionsOnCancelOrFail = slidesBackOnCancel
   }
 
   func draggingSession(
@@ -27,66 +42,79 @@ final class WorkspaceItemDragSource: NSObject, NSDraggingSource {
     operation: NSDragOperation
   ) {
     let id = pendingItemID
+    let image = pendingImage
     pendingItemID = nil
-    guard operation == [], let id else { return }
-    guard let window = sourceWindow, !window.frame.contains(screenPoint) else { return }
-    WorkspaceItemDragPuff.play(at: screenPoint)
+    pendingImage = nil
+    guard operation == [], removesOnDropOutside, let id else { return }
+    guard let window = sourceWindow, !window.frame.contains(screenPoint) else {
+      return
+    }
+    WorkspaceItemDragPuff.play(at: screenPoint, image: image)
     Task { @MainActor in
       AppState.shared.dropOutsideWindow(itemID: id)
     }
   }
 }
 
-/// 拖出窗体时的一小段消散：快速扩张 + 淡出，配一声很轻的系统音。
-/// 没有它，松手时虚影会缩回原位，看起来像"没放下"，而不是"已经拿掉了"。
+/// 拖出分类时的消散：虚影留在松手处，放大、变淡、散开，配一声很轻的系统音。
+/// 像把 Dock 里的图标拖走那样，表达「已经拿掉了」，而不是滑回原位。
 @MainActor
 enum WorkspaceItemDragPuff {
-  static func play(at screenPoint: NSPoint) {
-    let size: CGFloat = 40
+  static func play(at screenPoint: NSPoint, image: NSImage?) {
+    let size = image?.size ?? WorkspaceItemDrag.suggestedGhostSize
     let frame = NSRect(
-      x: screenPoint.x - size / 2,
-      y: screenPoint.y - size / 2,
-      width: size,
-      height: size
-    )
-    let window = NSWindow(
-      contentRect: frame,
-      styleMask: .borderless,
-      backing: .buffered,
-      defer: false
-    )
+      x: screenPoint.x - size.width / 2,
+      y: screenPoint.y - size.height / 2,
+      width: size.width,
+      height: size.height
+    ).insetBy(dx: -size.width * 0.3, dy: -size.height * 0.6)
+    let window = NSWindow(contentRect: frame, styleMask: .borderless, backing: .buffered, defer: false)
     window.isOpaque = false
     window.backgroundColor = .clear
     window.hasShadow = false
     window.ignoresMouseEvents = true
-    window.level = .floating
+    window.level = .popUpMenu
 
-    let dot = NSView(frame: NSRect(origin: .zero, size: frame.size))
-    dot.wantsLayer = true
-    dot.layer?.cornerRadius = size / 2
-    dot.layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.5).cgColor
-    window.contentView = dot
+    let host = NSView(frame: NSRect(origin: .zero, size: frame.size))
+    host.wantsLayer = true
+    host.layerUsesCoreImageFilters = true
+    let ghost = CALayer()
+    ghost.bounds = CGRect(origin: .zero, size: size)
+    ghost.position = CGPoint(x: frame.width / 2, y: frame.height / 2)
+    ghost.contents = image
+    ghost.contentsScale = window.backingScaleFactor
+    host.layer?.addSublayer(ghost)
+    window.contentView = host
     window.orderFrontRegardless()
 
+    let duration = 0.28
     let scale = CABasicAnimation(keyPath: "transform.scale")
-    scale.fromValue = 0.7
-    scale.toValue = 1.7
+    scale.fromValue = 1
+    scale.toValue = 1.35
     let fade = CABasicAnimation(keyPath: "opacity")
     fade.fromValue = 1
     fade.toValue = 0
+    let blur = CABasicAnimation(keyPath: "filters.blur.inputRadius")
+    blur.fromValue = 0
+    blur.toValue = 6
+    if let filter = CIFilter(name: "CIGaussianBlur") {
+      filter.name = "blur"
+      ghost.filters = [filter]
+    }
     let group = CAAnimationGroup()
-    group.animations = [scale, fade]
-    group.duration = 0.3
+    group.animations = [scale, fade, blur]
+    group.duration = duration
     group.timingFunction = CAMediaTimingFunction(name: .easeOut)
-    dot.layer?.add(group, forKey: "puff")
+    ghost.opacity = 0
+    ghost.add(group, forKey: "dissolve")
 
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+    DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.04) {
       window.orderOut(nil)
     }
 
-    // 很轻、很短。只为让"删除"这件事有落点感，不抢注意力。
+    // 很轻、很短。只为让「移出」这件事有落点感，不抢注意力。
     if let sound = NSSound(named: "Tink") {
-      sound.volume = 0.22
+      sound.volume = 0.2
       sound.play()
     }
   }
@@ -106,10 +134,23 @@ enum WorkspaceItemDragSession {
     let writer = NSPasteboardItem()
     writer.setData(WorkspaceItemDrag.encode(itemID), forType: WorkspaceItemDrag.pasteboardType)
     let item = NSDraggingItem(pasteboardWriter: writer)
-    let image = WorkspaceItemDrag.draggingImage(title: title)
-    item.setDraggingFrame(NSRect(origin: .zero, size: WorkspaceItemDrag.suggestedGhostSize), contents: image)
+    var image = NSImage()
+    view.effectiveAppearance.performAsCurrentDrawingAppearance {
+      image = WorkspaceItemDrag.draggingImage(title: title)
+    }
+    let origin = view.convert(event.locationInWindow, from: nil)
+    let ghostSize = WorkspaceItemDrag.suggestedGhostSize
+    item.setDraggingFrame(
+      NSRect(x: origin.x - 18, y: origin.y - ghostSize.height / 2, width: ghostSize.width, height: ghostSize.height),
+      contents: image
+    )
     if let source = source as? WorkspaceItemDragSource {
-      source.prepare(itemID: itemID, window: view.window)
+      source.prepare(
+        itemID: itemID,
+        window: view.window,
+        image: image,
+        removesOnDropOutside: AppState.shared.history.tagFilter != nil
+      )
     }
     view.beginDraggingSession(with: [item], event: event, source: source)
   }

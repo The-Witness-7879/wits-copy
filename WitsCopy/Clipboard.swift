@@ -126,10 +126,9 @@ enum ExplicitPastePerformer {
     switch state {
     case .untrusted:
       NSLog(
-        "[WitsCopy] paste blocked: AXIsProcessTrusted=%d bundle=%@ path=%@",
+        "[WitsCopy] paste blocked: AXIsProcessTrusted=%d bundle=%@",
         AXIsProcessTrusted() ? 1 : 0,
-        Bundle.main.bundleIdentifier ?? "?",
-        Bundle.main.bundlePath
+        Bundle.main.bundleIdentifier ?? "?"
       )
       return .failed(.accessibilityDenied)
     case .missing:

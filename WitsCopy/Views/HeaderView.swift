@@ -28,7 +28,8 @@ struct HeaderView: View {
       WorkspaceOptionsButton(arrowEdge: .bottom, hit: CGSize(width: 28, height: 24))
         .modifier(LabToolbarChrome(nativePassthrough: true))
     }
-    .padding(.vertical, WorkspaceInsets.headerVertical)
+    .padding(.top, WorkspaceInsets.headerTop)
+    .padding(.bottom, WorkspaceInsets.headerBottom)
     .padding(.horizontal, 6)
     .padding(.trailing, Popup.horizontalPadding)
     .transaction { $0.animation = nil }

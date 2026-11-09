@@ -87,4 +87,9 @@ extension Defaults.Keys {
     default: [],
     suite: preferencesSuite
   )
+  static let workspaceTagStyles = Key<[String: WorkspaceTagStyle]>(
+    "workspaceTagStyles",
+    default: [:],
+    suite: preferencesSuite
+  )
 }

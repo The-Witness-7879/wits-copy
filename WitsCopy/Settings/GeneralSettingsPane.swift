@@ -17,7 +17,7 @@ struct GeneralSettingsPane: View {
   var body: some View {
     SettingsLayout.form {
       SettingsLayout.group {
-        HStack(spacing: 8) {
+        SettingsLayout.inlineCheckboxLine {
           Toggle(isOn: Binding(
             get: { AppState.shared.softwareUpdater.automaticallyChecksForUpdates },
             set: { AppState.shared.softwareUpdater.setAutomaticallyChecksForUpdates($0) }
@@ -30,6 +30,8 @@ struct GeneralSettingsPane: View {
           } label: {
             Text("CheckNow", tableName: "GeneralSettings")
           }
+          // Small, so it overhangs the checkbox line by only 1.5pt each side.
+          .controlSize(.small)
           .disabled(!AppState.shared.softwareUpdater.canCheckForUpdates)
           .help(Text("CheckNowTooltip", tableName: "GeneralSettings"))
         }

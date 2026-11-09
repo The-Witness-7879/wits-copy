@@ -4,6 +4,8 @@ import Cocoa
 final class AboutPanel: NSPanel {
   override var canBecomeKey: Bool { true }
   override var canBecomeMain: Bool { true }
+  /// Esc closes, like any secondary window.
+  override func cancelOperation(_ sender: Any?) { performClose(sender) }
 }
 
 /// What an about window owes the user: who made this, which exact build is

@@ -140,6 +140,12 @@ final class SettingsTabButton: NSButton {
 
 /// Per-page, top-anchored settings window. Does not use SettingsWindowController:
 /// its frame autosave belongs to UserDefaults.standard, not the isolated suite.
+/// Esc closes the window when no control is editing. A focused text field or
+/// shortcut recorder handles Esc itself first (cancel edit / cancel recording).
+final class EscapeClosingWindow: NSWindow {
+  override func cancelOperation(_ sender: Any?) { performClose(sender) }
+}
+
 @MainActor
 final class LabSettingsWindowController: NSWindowController {
   private struct Page {
@@ -198,7 +204,7 @@ final class LabSettingsWindowController: NSWindowController {
   /// Keeping presentation in show() also permits non-presenting AppKit hosts.
   @discardableResult
   func prepareWindow(makeWindow: () -> NSWindow = {
-    NSWindow(
+    EscapeClosingWindow(
       contentRect: NSRect(origin: .zero, size: SettingsMetrics.windowContent),
       styleMask: [.titled, .closable, .miniaturizable],
       backing: .buffered,

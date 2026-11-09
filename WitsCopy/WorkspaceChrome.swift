@@ -50,8 +50,18 @@ enum ListToolbarLayout {
 /// Shared whitespace for the list column. Scroll indicators get their own lane,
 /// and neither the search field nor the last row touches the panel edge.
 enum WorkspaceInsets {
-  /// Same vertical padding above and below the search/tool row.
-  static let headerVertical: CGFloat = 6
+  /// Outer margin of the panel. The close button sits 8pt from the top and left
+  /// edges; the search field top, the rail's left edge and the gaps that face
+  /// them (search → first row, rail row → list row) all use the same value.
+  static let outer: CGFloat = 8
+  /// Height of the search/tool row (24pt buttons). The close button is centred on it.
+  static let toolBand: CGFloat = 24
+  /// The search field draws 0.5pt inside the 24pt tool band, so a 7.5pt band
+  /// offset puts its visible top exactly `outer` below the panel edge.
+  static let headerTop: CGFloat = outer - 0.5
+  /// Below the band: together with `columnTop` the first row starts `outer`
+  /// below the search field's visible bottom.
+  static let headerBottom: CGFloat = outer - 0.5 - columnTop
   /// Both columns start this far below the header.
   static let columnTop: CGFloat = 6
   /// Both columns keep this much space between their content and the panel bottom.

@@ -43,7 +43,7 @@ struct ListItemView<Title: View, ID: Hashable>: View {
   /// History rows only. Footer and paste-stack rows keep the legacy layout.
   var previewSlotID: String? = nil
   var bodyExcerpt: String? = nil
-  /// 所属分类。单标签模型，最多一个；圆点用和左栏相同的颜色算法。
+  /// 所属分类。单标签模型，最多一个；与侧栏共用图标和颜色。
   var categoryTag: String? = nil
   /// 置顶标记。和分类正交：「常用」里的条目仍然属于它自己的分类。
   var isPinned: Bool = false
@@ -185,20 +185,13 @@ struct ListItemView<Title: View, ID: Hashable>: View {
 
   private var historyBody: some View {
     HStack(alignment: .top, spacing: 0) {
-      // 左侧竖列只有应用图标和分类圆点。置顶只在行尾图钉上表示。
-      if showIcons || categoryTag != nil {
+      // 左列只表示来源；标签名称在元信息行前部，不再靠颜色猜归属。
+      if showIcons {
         VStack(alignment: .center, spacing: 5) {
           if showIcons, let appIcon {
             AppImageView(appImage: appIcon, size: NSSize(width: 30, height: 30))
           } else if showIcons {
             Color.clear.frame(width: 30, height: 30)
-          }
-          if let categoryTag {
-            Circle()
-              .fill(Color(nsColor: WorkspaceTagDot.color(for: categoryTag)))
-              .frame(width: 7, height: 7)
-              .background(RowCategoryAnchor(identifier: "lab-row-category-\(categoryTag)"))
-              .accessibilityLabel(Text(categoryTag))
           }
           Spacer(minLength: 0)
         }
@@ -208,7 +201,7 @@ struct ListItemView<Title: View, ID: Hashable>: View {
       }
 
       Spacer()
-        .frame(width: showIcons || categoryTag != nil ? 6 : 10)
+        .frame(width: showIcons ? 6 : 10)
 
       historyCenter
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -260,12 +253,23 @@ struct ListItemView<Title: View, ID: Hashable>: View {
   private var historyCenter: some View {
     ZStack(alignment: .topLeading) {
       if let image {
-        RowMiniImage(image: image, identifier: rowPreviewID)
-          // A thumbnail must not decide the row's height: the image row has to
-          // match a text row exactly, so the slot is pinned to the same content
-          // height and the picture is cropped inside it.
-          .frame(maxWidth: .infinity, minHeight: historyContentHeight, maxHeight: historyContentHeight)
-          .allowsHitTesting(false)
+        if compactRows {
+          HStack(spacing: 6) {
+            if let tag = visibleCategory {
+              categoryBadge(tag)
+                .frame(maxWidth: 100, alignment: .leading)
+                .layoutPriority(1)
+            }
+            historyThumbnail(image)
+          }
+          .frame(height: historyContentHeight)
+        } else {
+          VStack(alignment: .leading, spacing: HistoryRowMetrics.metadataGap) {
+            historyThumbnail(image)
+            historyMetadata
+          }
+          .frame(height: historyContentHeight)
+        }
       } else {
         RowSlotBox(identifier: rowPreviewID)
           .allowsHitTesting(false)
@@ -278,11 +282,18 @@ struct ListItemView<Title: View, ID: Hashable>: View {
                   .frame(width: 14, height: 14)
               }
               VStack(alignment: .leading, spacing: 1) {
-                ListItemTitleView(
-                  attributedTitle: attributedTitle,
-                  lineLimit: compactRows || showsHistoryExcerpt ? 1 : 2,
-                  title: title
-                )
+                HStack(spacing: 6) {
+                  if compactRows, let tag = visibleCategory {
+                    categoryBadge(tag)
+                      .frame(maxWidth: 100)
+                      .layoutPriority(1)
+                  }
+                  ListItemTitleView(
+                    attributedTitle: attributedTitle,
+                    lineLimit: compactRows || showsHistoryExcerpt ? 1 : 2,
+                    title: title
+                  )
+                }
                 if showsHistoryExcerpt, let bodyExcerpt {
                   Text(bodyExcerpt)
                     .font(.caption2)
@@ -290,13 +301,8 @@ struct ListItemView<Title: View, ID: Hashable>: View {
                     .lineLimit(2)
                     .accessibilityIdentifier("copy-history-item")
                 }
-                if let subtitle, !compactRows {
-                  Text(subtitle)
-                    .font(.caption2)
-                    .foregroundStyle(isSelected ? Color.white.opacity(0.85) : .secondary)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("lab-row-source-\(previewSlotID ?? "")")
+                if !compactRows {
+                  historyMetadata
                 }
               }
               .frame(maxWidth: .infinity, alignment: .leading)
@@ -306,20 +312,6 @@ struct ListItemView<Title: View, ID: Hashable>: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    .overlay(alignment: .bottomLeading) {
-      if image != nil, showsTitleWithImage {
-        OpaqueRowCaption(text: captionText)
-          .allowsHitTesting(false)
-          .padding(.horizontal, 4)
-          .padding(.bottom, 2)
-      }
-    }
-    .overlay {
-      if image != nil, isSelected || imageStateVisible {
-        ImageStateMark(identifier: "lab-row-image-state-\(previewSlotID ?? "")")
-          .allowsHitTesting(false)
-      }
-    }
     .overlay(alignment: .topTrailing) {
       if let index = selectionIndex {
         Text("\(index + 1)")
@@ -332,6 +324,61 @@ struct ListItemView<Title: View, ID: Hashable>: View {
     }
     .clipped()
     .accessibilityElement(children: .contain)
+  }
+
+  private func historyThumbnail(_ image: NSImage) -> some View {
+    let height = compactRows ? historyContentHeight : HistoryRowMetrics.thumbnailHeight
+    return RowMiniImage(image: image, identifier: rowPreviewID)
+      .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
+      .allowsHitTesting(false)
+      .overlay {
+        if isSelected || imageStateVisible {
+          ImageStateMark(identifier: "lab-row-image-state-\(previewSlotID ?? "")")
+            .allowsHitTesting(false)
+        }
+      }
+      .overlay(alignment: .bottomLeading) {
+        if showsTitleWithImage {
+          OpaqueRowCaption(text: captionText)
+            .allowsHitTesting(false)
+            .padding(.horizontal, 4)
+            .padding(.bottom, 2)
+        }
+      }
+  }
+
+  /// 在具体分类里左栏已经给出了归属；聚合浏览才需要每行显示名称。
+  private var visibleCategory: String? {
+    guard let tag = categoryTag else { return nil }
+    if let filter = appState.history.tagFilter, filter.caseInsensitiveCompare(tag) == .orderedSame { return nil }
+    return tag
+  }
+
+  private func categoryBadge(_ tag: String) -> some View {
+    WorkspaceTagBadge(tag: tag, selected: isSelected)
+      .background(RowCategoryAnchor(identifier: "lab-row-category-\(tag)"))
+  }
+
+  private var sourceCaption: some View {
+    Text(verbatim: subtitle ?? "")
+      .font(.caption2)
+      .foregroundStyle(isSelected ? Color.white.opacity(0.85) : .secondary)
+      .lineLimit(1)
+      .truncationMode(.tail)
+      .background(RowCategoryAnchor(identifier: "lab-row-source-\(previewSlotID ?? "")"))
+      .accessibilityIdentifier("lab-row-source-\(previewSlotID ?? "")")
+  }
+
+  @ViewBuilder private var historyMetadata: some View {
+    if let tag = visibleCategory {
+      TagFirstMetadataLayout {
+        categoryBadge(tag)
+        sourceCaption
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+    } else if subtitle != nil {
+      sourceCaption
+    }
   }
 
   private var historyShortcuts: some View {
@@ -401,6 +448,9 @@ enum HistoryRowMetrics {
   /// long title must never stretch a single row: the list reads as one grid.
   /// 60 leaves room for title + two-line excerpt + source line.
   static let contentHeight: CGFloat = 60
+  static let metadataHeight: CGFloat = 16
+  static let metadataGap: CGFloat = 2
+  static var thumbnailHeight: CGFloat { contentHeight - metadataHeight - metadataGap }
   static let shortcutWidth: CGFloat = 26
   /// Row-end pin slot, immediately left of the shortcut lane.
   static let pinWidth: CGFloat = 22
@@ -570,14 +620,14 @@ private struct PathTooltipModifier: ViewModifier {
   }
 }
 
-/// Frame-sized anchor so row tests can measure the category dot. Not a button.
+/// Transparent, noninteractive frame marker for row layout measurements.
 private struct RowCategoryAnchor: NSViewRepresentable {
   var identifier: String
 
   func makeNSView(context: Context) -> NSView {
     let view = NSView(frame: .zero)
     view.translatesAutoresizingMaskIntoConstraints = false
-    view.setAccessibilityElement(true)
+    view.setAccessibilityElement(false)
     view.setAccessibilityIdentifier(identifier)
     return view
   }

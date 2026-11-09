@@ -23,49 +23,58 @@ struct WorkspaceManagementRail: View {
     let expanded = appState.managementRailVisible
     let tags = railTags
     let _ = appState.history.items.count
-    ScrollViewReader { proxy in
-      // Overlay scroller in the rail covers the hit target. Wheel and trackpad still scroll.
-      ScrollView(.vertical, showsIndicators: false) {
-        VStack(alignment: .leading, spacing: WorkspaceRailFlow.spacing) {
-          ForEach(WorkspaceSection.primaryRail) { section in
-            railButton(section, expanded: expanded)
-          }
-          ForEach(tags, id: \.self) { tag in
-            WorkspaceRailTagButton(tag: tag, expanded: expanded)
-              .id(tag)
-          }
-          WorkspaceRailRow(
-            systemName: "plus",
-            title: WorkspaceTagCopy.text("tag_directory_add"),
-            expanded: expanded,
-            selected: false,
-            help: WorkspaceTagCopy.text("tag_directory_add_help"),
-            identifier: "lab-rail-add-tag",
-            onTap: {
-              guard let view = plusAnchor else { return }
-              createController.present(
-                from: view,
-                onCommit: commitNewTag,
-                onCancel: cancelNewTag
-              )
+    VStack(alignment: .leading, spacing: 0) {
+      ScrollViewReader { proxy in
+        // Overlay scroller in the rail covers the hit target. Wheel and trackpad still scroll.
+        ScrollView(.vertical, showsIndicators: false) {
+          VStack(alignment: .leading, spacing: WorkspaceRailFlow.spacing) {
+            ForEach(WorkspaceSection.primaryRail) { section in
+              railButton(section, expanded: expanded)
             }
-          )
-          .background(WorkspaceRailAnchor { plusAnchor = $0 })
-          .iconHelp(WorkspaceTagCopy.text("tag_directory_add_help"))
-          .accessibilityIdentifier("lab-rail-add-tag")
-          .accessibilityLabel(Text(WorkspaceTagCopy.text("tag_directory_add")))
+            ForEach(tags, id: \.self) { tag in
+              WorkspaceRailTagButton(tag: tag, expanded: expanded)
+                .id(tag)
+            }
+            WorkspaceRailRow(
+              systemName: "plus",
+              title: WorkspaceTagCopy.text("tag_directory_add"),
+              expanded: expanded,
+              selected: false,
+              help: WorkspaceTagCopy.text("tag_directory_add_help"),
+              identifier: "lab-rail-add-tag",
+              onTap: {
+                guard let view = plusAnchor else { return }
+                createController.present(
+                  from: view,
+                  onCommit: commitNewTag,
+                  onCancel: cancelNewTag
+                )
+              }
+            )
+            .background(WorkspaceRailAnchor { plusAnchor = $0 })
+            .iconHelp(WorkspaceTagCopy.text("tag_directory_add_help"))
+            .accessibilityIdentifier("lab-rail-add-tag")
+            .accessibilityLabel(Text(WorkspaceTagCopy.text("tag_directory_add")))
+          }
+          .padding(.vertical, WorkspaceRailFlow.verticalPadding)
+          // 整行（选中底色）从距窗体 8pt 起，与关闭按钮左缘对齐；
+          // 右侧不留白，条目列自带的 8pt 就是对面那段间距。
+          .padding(.leading, WorkspaceRailMetrics.railLeading)
+          .padding(.trailing, WorkspaceRailMetrics.railTrailing)
+          .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .padding(.vertical, WorkspaceRailFlow.verticalPadding)
-        // 整行（选中底色）从距窗体 4pt 起，行内再缩 2pt 放图标，
-        // 图标中心落在 14pt，和标题栏那个圆点在同一条竖线上。
-        .padding(.horizontal, WorkspaceRailMetrics.railGutter)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onChange(of: scrollTag) {
+          guard let tag = scrollTag else { return }
+          proxy.scrollTo(tag, anchor: .bottom)
+          scrollTag = nil
+        }
       }
-      .onChange(of: scrollTag) {
-        guard let tag = scrollTag else { return }
-        proxy.scrollTo(tag, anchor: .bottom)
-        scrollTag = nil
-      }
+      // 设置固定在左栏底部，不随标签滚动；底边与条目列的底部留白一致。
+      settingsRow(expanded: expanded)
+        .padding(.leading, WorkspaceRailMetrics.railLeading)
+        .padding(.trailing, WorkspaceRailMetrics.railTrailing)
+        .padding(.top, WorkspaceRailFlow.spacing)
+        .padding(.bottom, WorkspaceInsets.columnBottom)
     }
     .frame(width: WorkspaceChrome.railWidth(expanded: expanded))
     .frame(maxHeight: .infinity, alignment: .top)
@@ -127,6 +136,23 @@ struct WorkspaceManagementRail: View {
         directoryError = error.message
       }
     }
+  }
+
+  private func settingsRow(expanded: Bool) -> some View {
+    let title = NSLocalizedString("rail_settings", comment: "")
+    let help = NSLocalizedString("rail_settings_help", comment: "")
+    return WorkspaceRailRow(
+      systemName: "gearshape",
+      title: title,
+      expanded: expanded,
+      selected: false,
+      help: help,
+      identifier: "lab-rail-settings",
+      onTap: { appState.openPreferences() }
+    )
+    .iconHelp(help)
+    .accessibilityIdentifier("lab-rail-settings")
+    .accessibilityLabel(Text(title))
   }
 
   private func railButton(_ section: WorkspaceSection, expanded: Bool) -> some View {
@@ -247,6 +273,7 @@ private func railHelpKey(_ section: WorkspaceSection) -> String {
 private enum RailTagEdit: Equatable {
   case rename
   case merge
+  case appearance
 }
 
 struct WorkspaceRailTagButton: View {
@@ -264,14 +291,15 @@ struct WorkspaceRailTagButton: View {
 
   var body: some View {
     WorkspaceRailRow(
-      dotColor: WorkspaceTagDot.color(for: tag),
+      tag: tag,
       title: tag,
       expanded: expanded,
       selected: selected,
       dropTargeted: dropHighlighted,
       help: tag,
       identifier: WorkspaceRailPolicy.accessibilityIdentifier(for: tag),
-      onTap: { WorkspaceRailPolicy.selectTag(tag, in: appState) }
+      onTap: { WorkspaceRailPolicy.selectTag(tag, in: appState) },
+      onIconTap: { present(.appearance) }
     )
     .onDrop(
       of: [UTType(exportedAs: WorkspaceItemDrag.typeIdentifier)],
@@ -298,8 +326,12 @@ struct WorkspaceRailTagButton: View {
     .iconHelp(tag)
     .accessibilityValue(WorkspaceRailFeedback.accessibilityValue(selected: selected, dropTarget: dropHighlighted))
     .popover(isPresented: editPresented, arrowEdge: .trailing) {
-      RailTagNamePopover(tag: tag, merging: edit == .merge)
-        .environment(appState)
+      if edit == .appearance {
+        WorkspaceTagAppearancePopover(tag: tag)
+      } else {
+        RailTagNamePopover(tag: tag, merging: edit == .merge)
+          .environment(appState)
+      }
     }
     .confirmationDialog("tag_delete_name", isPresented: $confirmDelete, titleVisibility: .visible) {
       Button("tag_delete_name", role: .destructive) {
@@ -460,6 +492,7 @@ private struct RailTagNamePopover: View {
     switch WorkspaceTagDirectoryActions.rename(
       from: tag,
       to: draft,
+      merging: mergeTargets.contains { $0.caseInsensitiveCompare(draft.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame },
       itemTagsAfter: { appState.history.knownTags },
       renameHistory: { WorkspaceRailPolicy.rename(tag, to: draft, in: appState) },
       rollbackHistory: { restored in
@@ -481,6 +514,7 @@ private struct RailTagNamePopover: View {
     switch WorkspaceTagDirectoryActions.rename(
       from: tag,
       to: target,
+      merging: true,
       itemTagsAfter: { appState.history.knownTags },
       renameHistory: { WorkspaceRailPolicy.merge(tag, into: target, in: appState) },
       rollbackHistory: { restored in
@@ -507,9 +541,7 @@ private struct MergeTargetRow: View {
   var body: some View {
     Button(action: action) {
       HStack(spacing: 6) {
-        Circle()
-          .fill(Color(nsColor: WorkspaceTagDot.color(for: name)))
-          .frame(width: 7, height: 7)
+        WorkspaceTagGlyph(tag: name, size: 12)
         Text(name)
           .foregroundStyle(Color.primary)
           .lineLimit(1)
@@ -556,7 +588,8 @@ struct WorkspaceOptionsButton: View {
 
   private var optionEntries: [ImmediateMenuEntry] {
     var entries: [ImmediateMenuEntry] = []
-    for item in appState.footer.items where item.title != "clear" {
+    // 设置已固定在左栏底部，菜单里不再重复。
+    for item in appState.footer.items where item.title != "clear" && item.title != "preferences" {
       entries.append(ImmediateMenuEntry(
         title: NSLocalizedString(item.title, comment: ""),
         identifier: "lab-option-\(item.title)",
@@ -620,7 +653,7 @@ struct SnippetComposer: View {
 /// 内容会自己居中，三行的图标和文字因此永远对不齐。
 struct WorkspaceRailRow: View {
   var systemName: String?
-  var dotColor: NSColor?
+  var tag: String?
   var title: String
   var expanded: Bool
   var selected: Bool
@@ -628,34 +661,54 @@ struct WorkspaceRailRow: View {
   var help: String
   var identifier: String
   var onTap: () -> Void
+  /// 只在展开档生效：点图标改外观，点名称或空白仍是切换分类。
+  /// 收起档只剩图标，整行仍只负责切换。
+  var onIconTap: (() -> Void)? = nil
 
   @State private var hovered = false
+  @State private var iconHovered = false
+
+  private var iconIsSeparate: Bool { expanded && onIconTap != nil }
 
   private var rowWidth: CGFloat {
     let rail = AppState.shared.effectiveRailWidth
-    // 选中底色离窗体左右各 4pt，行宽就是栏宽减掉这两段。
-    return max(16, rail - WorkspaceRailMetrics.railGutter * 2)
+    // 行宽就是栏宽减掉左侧 8pt（右侧不留，条目列自带间距）。
+    return max(16, rail - WorkspaceRailMetrics.railLeading - WorkspaceRailMetrics.railTrailing)
   }
 
   var body: some View {
-    Button(action: onTap) {
-      HStack(spacing: 3) {
-        iconSlot
-        if expanded {
-          Text(title)
-            .font(.system(size: 12))
-            .foregroundStyle(selected ? Color.primary : Color.secondary)
-            .lineLimit(1)
-            .help(help)
-          Spacer(minLength: 0)
-        }
+    HStack(spacing: 0) {
+      if iconIsSeparate, let onIconTap {
+        Button(action: onIconTap) { iconButtonLabel }
+          .help(NSLocalizedString("tag_appearance_help", comment: ""))
+          .buttonStyle(.plain)
+          .onHover { iconHovered = $0 }
+        .accessibilityIdentifier("\(identifier)-appearance")
+        .accessibilityLabel(Text("tag_appearance_title"))
       }
-      .padding(.leading, WorkspaceRailMetrics.leadingInset)
-      .frame(width: rowWidth, height: WorkspaceRailMetrics.hit, alignment: .leading)
-      // 空区域也要接点击：整行是一个按钮，不是只有图标。
-      .contentShape(Rectangle())
+      Button(action: onTap) {
+        HStack(spacing: 3) {
+          if !iconIsSeparate { iconSlot }
+          if expanded {
+            Text(title)
+              .font(.system(size: 12))
+              .foregroundStyle(selected ? Color.primary : Color.secondary)
+              .lineLimit(1)
+              .help(help)
+            Spacer(minLength: 0)
+          }
+        }
+        .padding(.leading, iconIsSeparate ? 3 : WorkspaceRailMetrics.leadingInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        // 空区域也要接点击：名称和空白都属于切换按钮。
+        .contentShape(Rectangle())
+      }
+      .buttonStyle(.plain)
+      .accessibilityIdentifier(identifier)
+      .accessibilityLabel(Text(title))
+      .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
-    .buttonStyle(.plain)
+    .frame(width: rowWidth, height: WorkspaceRailMetrics.hit, alignment: .leading)
     .background(
       RoundedRectangle(cornerRadius: WorkspaceRailMetrics.cornerRadius, style: .continuous)
         .fill(
@@ -670,9 +723,20 @@ struct WorkspaceRailRow: View {
         .strokeBorder(Color.accentColor.opacity(dropTargeted ? 0.9 : 0), lineWidth: 1.5)
     )
     .help(help)
-    .accessibilityIdentifier(identifier)
-    .accessibilityLabel(Text(title))
-    .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+    .accessibilityElement(children: .contain)
+  }
+
+  private var iconButtonLabel: some View {
+    iconSlot
+      .background(
+        RoundedRectangle(cornerRadius: 4, style: .continuous)
+          .fill(Color.primary.opacity(iconHovered ? 0.12 : 0))
+          .padding(-3)
+      )
+      // 左侧留白也算图标按钮，指针不会落进死区。
+      .padding(.leading, WorkspaceRailMetrics.leadingInset)
+      .frame(maxHeight: .infinity)
+      .contentShape(Rectangle())
   }
 
   /// 两种图标共用一个 16pt 槽，中心对齐；圆点 10pt 与 12pt 的 SF Symbol 视觉重量相当。
@@ -682,10 +746,8 @@ struct WorkspaceRailRow: View {
         Image(systemName: systemName)
           .font(.system(size: 12, weight: .medium))
           .foregroundStyle(selected ? Color.accentColor : Color.secondary)
-      } else if let dotColor {
-        Circle()
-          .fill(Color(nsColor: dotColor))
-          .frame(width: 10, height: 10)
+      } else if let tag {
+        WorkspaceTagGlyph(tag: tag, size: 15)
       }
     }
     .frame(width: 16, height: 16)
