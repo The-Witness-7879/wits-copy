@@ -70,6 +70,7 @@
 "pdf_previous_page" = "上一页";
 "pdf_next_page" = "下一页";
 "kind_video" = "视频";
+"kind_audio" = "音频";
 "create_snippet" = "新建置顶";
 "about_summary" = "常驻菜单栏的剪贴板历史工具。复制过的文字、图片和文件自动留存，可以搜索、置顶、打标签，粘贴前先预览。历史只保存在这台 Mac 上，不会上传。";
 "clear_all_alert_message" = "确定要全部清除吗？";

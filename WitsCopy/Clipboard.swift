@@ -505,7 +505,8 @@ class Clipboard {
     let types = Set(pasteboard.types ?? []).union(items.flatMap(\.types))
     let filesEnabled = enabledTypes.contains(.fileURL)
     let videosEnabled = Defaults[.saveVideos]
-    if shouldIgnore(types, videosEnabled: videosEnabled) {
+    let audioEnabled = Defaults[.saveAudio]
+    if shouldIgnore(types, videosEnabled: videosEnabled || audioEnabled) {
       return
     }
     if !isFromWitsCopy && ClipboardIgnoreRules.shouldIgnore(
@@ -527,7 +528,9 @@ class Clipboard {
     // only files are all switched off is dropped whole, so Finder's companion
     // filename text and icon do not slip in as a text or image record.
     let fileDecisions = items.map {
-      CaptureFilePolicy.decision(for: $0, filesEnabled: filesEnabled, videosEnabled: videosEnabled)
+      CaptureFilePolicy.decision(
+        for: $0, filesEnabled: filesEnabled, videosEnabled: videosEnabled, audioEnabled: audioEnabled
+      )
     }
     if fileDecisions.contains(.rejected) && !fileDecisions.contains(.allowed) {
       return
@@ -593,7 +596,7 @@ class Clipboard {
   }
 
   private func shouldIgnore(_ types: Set<NSPasteboard.PasteboardType>, videosEnabled: Bool) -> Bool {
-    // Videos ride on `.fileURL`; keep that type in play while the video switch is on.
+    // Videos and audio ride on `.fileURL`; keep that type in play while either switch is on.
     let accepted = videosEnabled ? enabledTypes.union([.fileURL]) : enabledTypes
     return types.isDisjoint(with: accepted) || !types.isDisjoint(with: ignoredTypes)
   }

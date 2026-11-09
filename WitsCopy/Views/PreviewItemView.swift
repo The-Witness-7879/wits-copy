@@ -19,6 +19,12 @@ final class PreviewModel {
   var pdfScale: CGFloat = 1
   var officeText: String?
   var systemURL: URL?
+  /// Video and audio: nil while the file is being looked at, then whether
+  /// AVKit can play it. Unplayable media falls back to Quick Look.
+  var mediaPlayable: Bool?
+  var mediaHasVideo = false
+  var audioInfo = AudioInfo()
+  var playback: MediaPlayback?
   var filename: String?
   var application: String?
   var firstCopiedAt: Date?
@@ -30,6 +36,8 @@ final class PreviewModel {
   private var imageData: Data?
 
   func stopMedia() {
+    playback?.stop()
+    playback = nil
     gifProvider?.release()
     gifProvider = nil
     gifFrames = []
@@ -78,7 +86,20 @@ final class PreviewModel {
       await loadPDF(source, fileIndex: fileIndex, token: token, session: session)
     case .office:
       await loadOffice(source, fileIndex: fileIndex, token: token, session: session)
-    case .media, .fallback:
+    case .media:
+      systemURL = selectedURL(source, fileIndex)
+      if let url = systemURL {
+        let result = await MediaInfoLoader.load(url)
+        guard session.isCurrent(token), !Task.isCancelled else { return }
+        mediaPlayable = result.playable
+        mediaHasVideo = result.hasVideo
+        audioInfo = result.info
+        if result.playable {
+          playback?.stop()
+          playback = MediaPlayback(url: url, duration: result.info.duration, autoplay: true)
+        }
+      }
+    case .fallback:
       systemURL = selectedURL(source, fileIndex)
     }
   }
@@ -123,6 +144,11 @@ final class PreviewModel {
     pdfPageCount = 0
     officeText = nil
     systemURL = nil
+    mediaPlayable = nil
+    mediaHasVideo = false
+    audioInfo = AudioInfo()
+    playback?.stop()
+    playback = nil
     imageData = nil
     pixelSize = nil
   }
@@ -184,6 +210,12 @@ final class PreviewModel {
   ) async {
     guard let prepared = await preparedImage(source, fileIndex: fileIndex, token: token, session: session) else { return }
     guard session.isCurrent(token), !Task.isCancelled else { return }
+    // APNG and animated WebP/HEICS play like GIF.
+    if let data = prepared.data, GraphicFormats.isAnimated(data: data) {
+      kind = .gif
+      await playAnimated(data, pixelSize: prepared.pixelSize, token: token, session: session)
+      return
+    }
     imageData = prepared.data
     pixelSize = prepared.pixelSize ?? pixelSize
     if prepared.data != nil { PreviewRecognizer.prewarm() }
@@ -201,9 +233,32 @@ final class PreviewModel {
     session: PreviewSession
   ) async {
     guard let prepared = await preparedImage(source, fileIndex: fileIndex, token: token, session: session) else { return }
-    guard let data = prepared.data, session.isCurrent(token), !Task.isCancelled else { return }
+    guard var data = prepared.data, session.isCurrent(token), !Task.isCancelled else { return }
+    var size = prepared.pixelSize
+    if GraphicFormats.isAnimatedCursor(data) {
+      let cursor = data
+      let converted = try? await PreviewHeavyQueue.shared.perform(metrics: session.metrics) {
+        GraphicFormats.animatedCursorAsPNG(cursor)
+      }
+      guard session.isCurrent(token), !Task.isCancelled else { return }
+      guard let png = converted ?? nil else {
+        notice = .cannotDecode
+        return
+      }
+      data = png
+      size = ImageProbe.pixelSize(data: png)
+    }
+    await playAnimated(data, pixelSize: size, token: token, session: session)
+  }
+
+  private func playAnimated(
+    _ data: Data,
+    pixelSize framePixels: CGSize?,
+    token: UInt64,
+    session: PreviewSession
+  ) async {
     imageData = data
-    pixelSize = prepared.pixelSize ?? pixelSize
+    pixelSize = framePixels ?? pixelSize
     PreviewRecognizer.prewarm()
     let metrics = session.metrics
     let plan: GIFPlaybackPlan
@@ -371,6 +426,15 @@ final class PreviewModel {
       return nil
     }
     guard session.isCurrent(token), !Task.isCancelled else { return nil }
+    if decoded.0 == nil, GraphicFormats.isSVG(data) {
+      let vector = try? await PreviewHeavyQueue.shared.perform(metrics: session.metrics) {
+        GraphicFormats.rasterizeSVG(data, maxEdge: PreviewLimits.maxImageEdge)
+      }
+      guard session.isCurrent(token), !Task.isCancelled else { return nil }
+      if let vector = vector ?? nil {
+        return (data, vector.image, vector.size)
+      }
+    }
     return (data, decoded.0, decoded.1)
   }
 
@@ -395,7 +459,15 @@ struct PreviewItemView: View {
 
   @State private var session = PreviewSession()
   @State private var model = PreviewModel()
-  @State private var wraps = true
+  /// Prose wraps by default; code does not, like an editor, because its long
+  /// lines (minified CSS/JS above all) read better scrolled than folded. Each
+  /// remembers its own toggle while the app runs.
+  @State private var textWraps = true
+  @State private var codeWraps = false
+  private var wraps: Bool { model.kind == .code ? codeWraps : textWraps }
+  private func toggleWraps() {
+    if model.kind == .code { codeWraps.toggle() } else { textWraps.toggle() }
+  }
   @State private var showLineNumbers = true
   @State private var fileIndex = 0
   @State private var showSystemPreview = false
@@ -484,7 +556,7 @@ struct PreviewItemView: View {
             identifier: "lab-wrap-toggle",
             label: NSLocalizedString("WrapLines", tableName: "PreviewItemView", comment: ""),
             tint: wraps ? .controlAccentColor : .secondaryLabelColor,
-            action: { wraps.toggle() }
+            action: { toggleWraps() }
           )
         }
         if tools.contains(.lineNumbers) {
@@ -775,7 +847,11 @@ struct PreviewItemView: View {
 
   @ViewBuilder
   private var systemBody: some View {
-    if showSystemPreview, let url = model.systemURL {
+    if model.kind == .media, model.mediaPlayable == true, let url = model.systemURL, let playback = model.playback {
+      mediaBody(url, playback: playback)
+    } else if model.kind == .media, model.mediaPlayable == nil, model.systemURL != nil {
+      ProgressView()
+    } else if showSystemPreview, let url = model.systemURL {
       QuickLookFileView(
         url: url,
         sessionID: "\(item.id.uuidString)-\(url.path)-manual",
@@ -787,6 +863,57 @@ struct PreviewItemView: View {
       Text(model.filename ?? "")
         .font(.caption)
         .foregroundStyle(.secondary)
+    }
+  }
+
+  /// Video fills the canvas; audio shows cover art (or a music glyph) with
+  /// title and artist. Both use the same app-styled control bar below.
+  @ViewBuilder
+  private func mediaBody(_ url: URL, playback: MediaPlayback) -> some View {
+    if model.mediaHasVideo {
+      VStack(spacing: 8) {
+        VideoSurface(player: playback.player)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+        MediaControlBar(playback: playback)
+          .padding(.horizontal, 8)
+      }
+      .accessibilityIdentifier("lab-video-preview")
+    } else {
+      VStack(spacing: 12) {
+        Spacer(minLength: 0)
+        Group {
+          if let art = model.audioInfo.artwork {
+            Image(nsImage: art)
+              .resizable()
+              .aspectRatio(contentMode: .fit)
+              .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+          } else {
+            Image(systemName: "music.note")
+              .font(.system(size: 56, weight: .light))
+              .foregroundStyle(.secondary)
+          }
+        }
+        .frame(maxWidth: 200, maxHeight: 200)
+        VStack(spacing: 3) {
+          Text(model.audioInfo.title ?? model.filename ?? url.lastPathComponent)
+            .font(.headline)
+            .lineLimit(2)
+            .multilineTextAlignment(.center)
+          let byline = [model.audioInfo.artist, model.audioInfo.album].compactMap { $0 }.joined(separator: " · ")
+          if !byline.isEmpty {
+            Text(byline)
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+              .lineLimit(1)
+          }
+        }
+        Spacer(minLength: 0)
+        MediaControlBar(playback: playback)
+          .frame(maxWidth: 480)
+      }
+      .padding(.horizontal, 16)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+      .accessibilityIdentifier("lab-audio-preview")
     }
   }
 
@@ -803,6 +930,9 @@ struct PreviewItemView: View {
       }
       if let filename = model.filename {
         labeled("File", filename)
+      }
+      if model.kind == .media, let duration = model.audioInfo.duration, duration > 0 {
+        labeled("Duration", MediaInfoLoader.durationText(duration))
       }
       if let first = model.firstCopiedAt {
         labeled("FirstCopyTime", first.formatted(date: .abbreviated, time: .standard))

@@ -102,6 +102,7 @@ class HistoryItem {
     case text
     case image
     case video
+    case audio
     case file
   }
 
@@ -110,6 +111,7 @@ class HistoryItem {
   var contentKind: ContentKind {
     if hasImagePayload { return .image }
     if fileURLs.contains(where: Self.isMovieFile) { return .video }
+    if fileURLs.contains(where: Self.isAudioFile) { return .audio }
     if !fileURLs.isEmpty { return .file }
     return .text
   }
@@ -118,6 +120,13 @@ class HistoryItem {
     let ext = url.pathExtension
     guard !ext.isEmpty, let type = UTType(filenameExtension: ext) else { return false }
     return type.conforms(to: .movie) || type.conforms(to: .video)
+  }
+
+  /// Sound-only files: mp3, m4a, wav, aiff, flac… A movie with sound stays video.
+  static func isAudioFile(_ url: URL) -> Bool {
+    let ext = url.pathExtension
+    guard !ext.isEmpty, let type = UTType(filenameExtension: ext) else { return false }
+    return type.conforms(to: .audio) && !isMovieFile(url)
   }
 
   @Relationship(deleteRule: .cascade, inverse: \HistoryItemContent.item)

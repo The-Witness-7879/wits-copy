@@ -55,6 +55,7 @@ struct HeaderView: View {
         typeEntry(.text, title: "kind_text", identifier: "lab-type-text"),
         typeEntry(.image, title: "kind_image", identifier: "lab-type-image"),
         typeEntry(.video, title: "kind_video", identifier: "lab-type-video"),
+        typeEntry(.audio, title: "kind_audio", identifier: "lab-type-audio"),
         typeEntry(.file, title: "kind_file", identifier: "lab-type-file")
       ]
     )
@@ -85,6 +86,8 @@ struct HeaderView: View {
       kind = NSLocalizedString("kind_image", comment: "")
     case .video:
       kind = NSLocalizedString("kind_video", comment: "")
+    case .audio:
+      kind = NSLocalizedString("kind_audio", comment: "")
     case .file:
       kind = NSLocalizedString("kind_file", comment: "")
     case nil:

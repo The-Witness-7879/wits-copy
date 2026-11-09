@@ -265,6 +265,8 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKey
   /// Set while applying the frame back into the split, so a hosting-view
   /// layout pass cannot re-enter and write a stale width.
   private var isSyncingSplit = false
+  /// A close requested mid-resize; performed when the resize ends.
+  private var closesAfterLiveResize = false
   /// 上一次拖动中的 frame，用来判断用户拖的是哪条边。
   private var lastLiveFrame: CGRect?
   /// True only after the user clicks search, the original-text editor, or the
@@ -599,6 +601,10 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKey
     AppState.shared.preview.currentHeight = frame.height
     AppState.shared.preview.endResize()
     saveWindowPosition()
+    if closesAfterLiveResize {
+      closesAfterLiveResize = false
+      close()
+    }
   }
 
   func windowDidBecomeKey(_ notification: Notification) {
@@ -620,7 +626,8 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKey
     if NSApp.alertWindow != nil {
       context.confirmationPresented = true
     }
-    if PanelClosePolicy.decide(.resignKey, context: context) == .close {
+    // Resizing is using the panel, not leaving it.
+    if !inLiveResize, PanelClosePolicy.decide(.resignKey, context: context) == .close {
       close()
     } else if isPresented {
       DispatchQueue.main.async { [weak self] in
@@ -654,8 +661,11 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKey
   static func hitRequestsKey(_ view: NSView?) -> Bool {
     var current = view
     while let view = current {
+      // Sliders (media scrubber and volume) track the mouse only in the key
+      // window; a non-key panel left them inert.
       if view is OriginalTextBodyView
-        || view is PinnedShortcutRecorder {
+        || view is PinnedShortcutRecorder
+        || view is NSSlider {
         return true
       }
       if let rich = view as? RichTextBodyView, rich.allowsEdit {
@@ -740,6 +750,13 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKey
   }
 
   override func close() {
+    // AppKit keeps a window on screen while it is being resized, so closing
+    // now would only drop the content and leave an empty glass frame that
+    // takes no input. Finish the close once the resize ends.
+    if inLiveResize {
+      closesAfterLiveResize = true
+      return
+    }
     removeBrowsingInputMonitors()
     acceptsKeyForEditing = false
     AppState.shared.panelPresented = false
@@ -1002,7 +1019,10 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKey
     let context = AppState.shared.focusContext
     let dismiss = PanelOutsideClick.shouldDismiss(
       presented: isPresented,
-      insideOwnedWindow: ownsScreenPoint(screenPoint(of: event)),
+      // A press delivered to one of our own windows is ours even when it lands
+      // outside the frame: the resize band reaches a few points past the edge,
+      // and treating that as an outside click closed the panel mid-resize.
+      insideOwnedWindow: event.window != nil || ownsScreenPoint(screenPoint(of: event)),
       windowPinned: context.windowPinned,
       tagPopover: context.tagPopoverPresented,
       confirmation: context.confirmationPresented || NSApp.alertWindow != nil,

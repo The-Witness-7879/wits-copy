@@ -68,6 +68,7 @@
 "pdf_previous_page" = "Previous page";
 "pdf_next_page" = "Next page";
 "kind_video" = "Video";
+"kind_audio" = "Audio";
 "create_snippet" = "New pin";
 "about_summary" = "A clipboard history that lives in the menu bar. Text, images, and files you copy are kept automatically — search, pin, and tag them, and preview before you paste. History is stored only on this Mac and is never uploaded by the app.";
 "clear_all_alert_message" = "Clear every item?";

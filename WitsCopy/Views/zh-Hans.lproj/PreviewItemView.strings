@@ -8,13 +8,14 @@
 "PreviewKey" = "按 {previewKey} 切换预览。";
 "Dimensions" = "尺寸：";
 "File" = "文件：";
+"Duration" = "时长：";
 "CopyExtractedText" = "复制文字";
 "RecognizeText" = "识别文字";
 "Recognizing" = "识别中…";
 "NoTextFound" = "没有识别到文字";
 "RecognitionFailed" = "识别失败";
 "CopyRecognizedText" = "复制识别结果";
-"PreviewTruncated" = "预览已截断。复制仍使用原文。";
+"PreviewTruncated" = "内容较长，仅预览前 64,000 个字符；复制仍是完整内容。";
 "FileMissingReference" = "文件不在原路径。这只是引用，不是备份。";
 "FileUnavailable" = "文件不可用";
 "Mode" = "模式";
@@ -34,3 +35,8 @@
 "OversizeSkipped" = "文件超过预览限额，未完整读入。复制仍使用原文件。";
 "ZoomOut" = "缩小";
 "ZoomIn" = "放大";
+"Play" = "播放";
+"Pause" = "暂停";
+"Mute" = "静音";
+"Unmute" = "取消静音";
+"Volume" = "音量";

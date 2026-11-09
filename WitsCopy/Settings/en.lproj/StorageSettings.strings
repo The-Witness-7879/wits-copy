@@ -17,6 +17,8 @@
 "SizeStepperHelp" = "Change how many history items to keep.";
 "Videos" = "Videos";
 "SaveVideosHelp" = "Record copied video files. Only the path is kept; the file is not backed up.";
+"Audio" = "Audio";
+"SaveAudioHelp" = "Record copied audio files. Only the path is kept; the file is not backed up.";
 
 "HistoryUsage" = "History size:";
 "HistoryUsageDescription" = "Disk space used by WitsCopy’s history database.";

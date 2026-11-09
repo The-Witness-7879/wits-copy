@@ -1301,6 +1301,37 @@ final class PreviewEditContractTests: XCTestCase {
     XCTAssertLessThan(probe?.frame.maxX ?? 0, 0)
   }
 
+  /// Code opens unwrapped, so the text view has already grown to the full
+  /// line width. Turning wrap on must fold it back to the viewport; a view
+  /// left at the old width keeps one endless line.
+  func testCodeOpenedUnwrappedFoldsWhenWrapIsTurnedOn() throws {
+    let line = "(function(){'use strict';" + String(repeating: "var a=b.c(d,e)||f;", count: 900) + "})();"
+    let render = PreviewTextRenderer.render(text: line, filename: "course.js", mode: .code)
+    XCTAssertEqual(render.kind, .code)
+    let flag = SelectableWrapFlag()
+    flag.wraps = false
+    let host = try mount(
+      SelectableWrapHarness(render: render, flag: flag, showsLineNumbers: true)
+        .frame(width: 448, height: 180)
+    )
+    probe?.setFrame(NSRect(x: -24000, y: -24000, width: 448, height: 180), display: false)
+    host.frame = NSRect(x: 0, y: 0, width: 448, height: 180)
+    drain(0.05)
+    host.layoutSubtreeIfNeeded()
+    let scroll = try XCTUnwrap(find("lab-text-preview", in: host) as? NSScrollView)
+    let text = try XCTUnwrap(scroll.documentView as? NSTextView)
+    let off = readWrapLayout(text)
+    XCTAssertGreaterThan(off.usedWidth, 2_000, "fixture did not open as one long line: \(off.line(state: "off"))")
+
+    flag.wraps = true
+    drain(0.3)
+    host.layoutSubtreeIfNeeded()
+    let on = readWrapLayout(text)
+    XCTAssertGreaterThanOrEqual(on.fragments, 10, "wrap on did not fold the long line: \(on.line(state: "on"))")
+    XCTAssertLessThanOrEqual(on.usedWidth, 448 + 8, "wrap on stayed wider than the viewport: \(on.line(state: "on"))")
+    XCTAssertLessThanOrEqual(text.frame.width, 448 + 8, "text view kept the unwrapped width: \(text.frame.width)")
+  }
+
   /// Hiding line numbers and switching plain↔code can keep the same characters.
   /// String equality must not freeze the previous font, color, or paragraph style.
   func testSelectableTextPreviewSameStringFollowsRenderAttributes() throws {

@@ -173,6 +173,43 @@ class HistoryItemTests: XCTestCase {
     XCTAssertEqual(png.contentKind, .image)
   }
 
+  func testSoundFileIsAudioAndMovieWithSoundStaysVideo() {
+    for ext in ["mp3", "m4a", "wav", "aiff", "flac"] {
+      XCTAssertEqual(historyItem(URL(fileURLWithPath: "/tmp/lab/song.\(ext)")).contentKind, .audio, ext)
+    }
+    XCTAssertEqual(historyItem(URL(fileURLWithPath: "/tmp/lab/clip.mp4")).contentKind, .video)
+    XCTAssertFalse(HistoryItem.isAudioFile(URL(fileURLWithPath: "/tmp/lab/clip.mov")))
+    XCTAssertEqual(
+      CaptureFilePolicy.decision(
+        for: URL(fileURLWithPath: "/tmp/lab/song.mp3"), filesEnabled: true, videosEnabled: true, audioEnabled: false
+      ),
+      .rejected
+    )
+  }
+
+  /// Editor layout: a right-aligned gutter, and a folded line continues after
+  /// the gutter plus its own indentation instead of at the left edge.
+  func testCodeLayoutHangsWrappedLinesUnderTheirIndent() throws {
+    let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+    let source = NSAttributedString(string: "a {\n    color: red;\n}", attributes: [.font: font])
+    let laid = SelectableTextPreview.editorLayout(source, gutter: ["1", "2", "3"])
+    let lines = laid.string.components(separatedBy: "\n")
+    XCTAssertEqual(lines, ["1  a {", "2      color: red;", "3  }"])
+    func indent(_ line: Int) throws -> CGFloat {
+      let start = lines[..<line].reduce(0) { $0 + ($1 as NSString).length + 1 }
+      let style = try XCTUnwrap(laid.attribute(.paragraphStyle, at: start, effectiveRange: nil) as? NSParagraphStyle)
+      XCTAssertEqual(style.firstLineHeadIndent, 0)
+      return style.headIndent
+    }
+    let plain = try indent(0)
+    XCTAssertGreaterThan(plain, 0, "continuation does not clear the gutter")
+    let tens = SelectableTextPreview.editorLayout(source, gutter: ["9", "10", "11"]).string
+    XCTAssertTrue(tens.hasPrefix(" 9  a {"), "gutter is not right-aligned: \(tens)")
+    XCTAssertEqual(try indent(1) - plain, ("    " as NSString).size(withAttributes: [.font: font]).width, accuracy: 0.5)
+    let bare = SelectableTextPreview.editorLayout(source, gutter: nil)
+    XCTAssertEqual(bare.string, source.string)
+  }
+
   func testAccurateOCRReturnsBilingualMarker() async throws {
     let data = try fixtureData("ocr-bilingual.png")
     let metrics = PreviewMetrics()
@@ -696,6 +733,78 @@ class HistoryItemTests: XCTestCase {
     item.title = item.generateTitle()
 
     return item
+  }
+
+  // MARK: Graphic formats
+
+  private func pngData(_ side: Int, red: CGFloat = 1) -> Data {
+    let ctx = CGContext(
+      data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+      space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )!
+    ctx.setFillColor(CGColor(srgbRed: red, green: 0.2, blue: 0.2, alpha: 1))
+    ctx.fill(CGRect(x: 0, y: 0, width: side, height: side))
+    return NSBitmapImageRep(cgImage: ctx.makeImage()!).representation(using: .png, properties: [:])!
+  }
+
+  /// ICO/CUR container with PNG entries; type 2 is a cursor.
+  private func iconFile(type: UInt16, sides: [Int]) -> Data {
+    func le16(_ v: Int) -> [UInt8] { [UInt8(v & 0xff), UInt8(v >> 8 & 0xff)] }
+    func le32(_ v: Int) -> [UInt8] { le16(v & 0xffff) + le16(v >> 16) }
+    let images = sides.map { pngData($0) }
+    var out: [UInt8] = le16(0) + le16(Int(type)) + le16(sides.count)
+    var offset = 6 + 16 * sides.count
+    for (side, image) in zip(sides, images) {
+      out += [UInt8(side >= 256 ? 0 : side), UInt8(side >= 256 ? 0 : side), 0, 0] + le16(type == 2 ? 1 : 1)
+        + le16(type == 2 ? 1 : 32) + le32(image.count) + le32(offset)
+      offset += image.count
+    }
+    var data = Data(out)
+    images.forEach { data.append($0) }
+    return data
+  }
+
+  func testGraphicFilesRouteToImagePreviewAndHTMLStaysSource() {
+    for name in ["arrow.cur", "app.ico", "logo.svg", "art.psd", "shot.tga", "pic.avif", "pic.jxl"] {
+      XCTAssertEqual(PreviewClassifier.classify(source: fileSource(URL(fileURLWithPath: "/tmp/lab/\(name)"))), .image, name)
+    }
+    XCTAssertEqual(PreviewClassifier.classify(source: fileSource(URL(fileURLWithPath: "/tmp/lab/busy.ani"))), .gif)
+    XCTAssertEqual(PreviewClassifier.classify(source: fileSource(URL(fileURLWithPath: "/tmp/lab/page.html"))), .code)
+  }
+
+  func testCursorShowsItsLargestSize() throws {
+    let cursor = iconFile(type: 2, sides: [16, 64, 32])
+    let image = try XCTUnwrap(ImageProbe.downsample(data: cursor, maxEdge: 2_048), "cursor did not decode")
+    XCTAssertEqual(image.width, 64)
+    XCTAssertEqual(ImageProbe.pixelSize(data: cursor), CGSize(width: 64, height: 64))
+    XCTAssertFalse(GraphicFormats.isAnimated(data: cursor), "icon sizes read as animation frames")
+  }
+
+  func testSVGRasterizesAtItsAspect() throws {
+    let svg = Data(#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="red"/></svg>"#.utf8)
+    let result = try XCTUnwrap(GraphicFormats.rasterizeSVG(svg, maxEdge: 2_048))
+    XCTAssertEqual(result.size, CGSize(width: 40, height: 20))
+    XCTAssertEqual(Double(result.image.width) / Double(result.image.height), 2, accuracy: 0.01)
+    XCTAssertGreaterThanOrEqual(result.image.width, 1_024, "vector rasterized blurry")
+  }
+
+  func testAnimatedCursorPlaysWithItsTiming() throws {
+    func tag(_ s: String) -> [UInt8] { Array(s.utf8) }
+    func le32(_ v: Int) -> [UInt8] { [UInt8(v & 0xff), UInt8(v >> 8 & 0xff), UInt8(v >> 16 & 0xff), UInt8(v >> 24 & 0xff)] }
+    func chunk(_ id: String, _ body: [UInt8]) -> [UInt8] { tag(id) + le32(body.count) + body + (body.count % 2 == 1 ? [0] : []) }
+    let icons = [iconFile(type: 2, sides: [32]), iconFile(type: 2, sides: [32])].map { chunk("icon", [UInt8]($0)) }
+    // 2 frames, 3 steps: 0,1,0 at 6, 12, 6 jiffies.
+    let anih = le32(36) + le32(2) + le32(3) + le32(0) + le32(0) + le32(0) + le32(0) + le32(6) + le32(3)
+    let body = tag("ACON") + chunk("anih", anih) + chunk("rate", le32(6) + le32(12) + le32(6))
+      + chunk("seq ", le32(0) + le32(1) + le32(0)) + chunk("LIST", tag("fram") + icons.flatMap { $0 })
+    let ani = Data(tag("RIFF") + le32(body.count) + body)
+    XCTAssertTrue(GraphicFormats.isAnimatedCursor(ani))
+    let png = try XCTUnwrap(GraphicFormats.animatedCursorAsPNG(ani), "ani did not convert")
+    XCTAssertTrue(GraphicFormats.isAnimated(data: png))
+    let timeline = try XCTUnwrap(GIFTimeline.read(data: png))
+    XCTAssertEqual(timeline.playbackDelays.count, 3)
+    XCTAssertEqual(timeline.playbackDelays[0], 0.1, accuracy: 0.01)
+    XCTAssertEqual(timeline.playbackDelays[1], 0.2, accuracy: 0.01)
   }
 }
 // swiftlint:enable force_try

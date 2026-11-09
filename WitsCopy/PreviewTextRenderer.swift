@@ -689,8 +689,10 @@ struct SelectableTextPreview: NSViewRepresentable {
     to textView: NSTextView,
     coordinator: Coordinator
   ) {
+    // Code gets editor layout (gutter, hanging indent) whether or not it wraps;
+    // prose keeps its own paragraph styles.
     let display = NSAttributedString(
-      attributedString: showsLineNumbers ? numbered(render) : render.attributed
+      attributedString: (showsLineNumbers || render.monospace) ? numbered(render) : render.attributed
     )
     let selected = textView.selectedRange()
     let scroll = textView.enclosingScrollView
@@ -707,6 +709,12 @@ struct SelectableTextPreview: NSViewRepresentable {
     let tracked = viewport > 1 ? viewport : max(textView.bounds.width, 1)
     textView.textContainer?.widthTracksTextView = wraps
     textView.isHorizontallyResizable = !wraps
+    // Turning wrap on after an unwrapped layout: the view has already grown to
+    // the longest line, and a width-tracking container would follow that
+    // width and never fold. Shrink the view back to the viewport first.
+    if wraps, textView.frame.width > tracked + 0.5 {
+      textView.setFrameSize(NSSize(width: tracked, height: textView.frame.height))
+    }
     textView.textContainer?.containerSize = NSSize(
       width: wraps ? tracked : CGFloat.greatestFiniteMagnitude,
       height: CGFloat.greatestFiniteMagnitude
@@ -730,28 +738,66 @@ struct SelectableTextPreview: NSViewRepresentable {
     }
   }
 
+  /// Editor-style layout. With line numbers, a right-aligned gutter; wrapped
+  /// continuation lines start after the gutter and after the line's own
+  /// leading indentation, so a folded line never looks like a new one.
   private func numbered(_ render: PreviewTextRender) -> NSAttributedString {
     let gutter = render.lineNumbers.split(separator: "\n", omittingEmptySubsequences: false)
-    let lines = render.attributed.string.split(separator: "\n", omittingEmptySubsequences: false)
+    return Self.editorLayout(render.attributed, gutter: showsLineNumbers ? gutter.map(String.init) : nil)
+  }
+
+  static func editorLayout(_ source: NSAttributedString, gutter: [String]?) -> NSAttributedString {
+    let text = source.string as NSString
     let result = NSMutableAttributedString()
-    let font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-    let count = max(gutter.count, lines.count)
-    for index in 0..<count {
-      let number = index < gutter.count ? String(gutter[index]) : ""
-      result.append(NSAttributedString(string: number.padding(toLength: 4, withPad: " ", startingAt: 0), attributes: [
-        .font: font,
-        .foregroundColor: NSColor.tertiaryLabelColor
-      ]))
-      if index < lines.count {
-        let line = String(lines[index])
-        let range = (render.attributed.string as NSString).range(of: line)
-        if range.location != NSNotFound {
-          result.append(render.attributed.attributedSubstring(from: range))
-        } else {
-          result.append(NSAttributedString(string: line))
-        }
+    let numberFont = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+    // Sized to the largest number and right-aligned, as editors do.
+    let digits = max(1, gutter?.map(\.count).max() ?? 0)
+    let gutterText = String(repeating: "0", count: digits) + "  "
+    let gutterWidth = gutter == nil ? 0 : (gutterText as NSString).size(withAttributes: [.font: numberFont]).width
+    var location = 0
+    var index = 0
+    while location <= text.length {
+      let lineRange = text.lineRange(for: NSRange(location: location, length: 0))
+      var body = lineRange
+      // Exclude the line terminator from the measured body.
+      while body.length > 0, let scalar = UnicodeScalar(text.character(at: NSMaxRange(body) - 1)),
+            CharacterSet.newlines.contains(scalar) {
+        body.length -= 1
       }
-      result.append(NSAttributedString(string: "\n"))
+      let line = NSMutableAttributedString()
+      if let gutter {
+        let number = index < gutter.count ? gutter[index] : ""
+        let padded = String(repeating: " ", count: max(0, digits - number.count)) + number + "  "
+        line.append(NSAttributedString(string: padded, attributes: [
+          .font: numberFont,
+          .foregroundColor: NSColor.tertiaryLabelColor
+        ]))
+      }
+      line.append(source.attributedSubstring(from: lineRange))
+      var indentWidth: CGFloat = 0
+      var leading = 0
+      while leading < body.length {
+        let unit = text.character(at: body.location + leading)
+        guard unit == 0x20 || unit == 0x09 else { break }
+        leading += 1
+      }
+      if leading > 0, leading < body.length {
+        let indent = source.attributedSubstring(from: NSRange(location: body.location, length: leading))
+        indentWidth = min(indent.size().width, 240)
+      }
+      // Keep the render's own paragraph style; only add the hanging indent.
+      let base = lineRange.length > 0
+        ? source.attribute(.paragraphStyle, at: lineRange.location, effectiveRange: nil) as? NSParagraphStyle
+        : nil
+      let style = (base?.mutableCopy() as? NSMutableParagraphStyle) ?? NSMutableParagraphStyle()
+      style.headIndent += gutterWidth + indentWidth
+      line.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: line.length))
+      result.append(line)
+      index += 1
+      if NSMaxRange(lineRange) >= text.length {
+        break
+      }
+      location = NSMaxRange(lineRange)
     }
     return result
   }

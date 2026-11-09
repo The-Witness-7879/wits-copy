@@ -4,6 +4,7 @@
 "NumberOfCopies" = "Number of copies:";
 "Dimensions" = "Dimensions:";
 "File" = "File:";
+"Duration" = "Duration:";
 "PinKey" = "Press {pinKey} to pin.";
 "UnpinKey" = "Press {pinKey} to unpin.";
 "DeleteKey" = "Press {deleteKey} to delete.";
@@ -14,7 +15,7 @@
 "NoTextFound" = "No text found";
 "RecognitionFailed" = "Recognition failed";
 "CopyRecognizedText" = "Copy recognized text";
-"PreviewTruncated" = "Preview is truncated. Copy still uses the original item.";
+"PreviewTruncated" = "Long content: showing the first 64,000 characters. Copy still uses the full item.";
 "FileMissingReference" = "File is not at the original path. This is a reference, not a backup.";
 "FileUnavailable" = "File unavailable";
 "Mode" = "Mode";
@@ -34,3 +35,8 @@
 "OversizeSkipped" = "File exceeds the preview limit and was not fully read. Copy still uses the original item.";
 "ZoomOut" = "Zoom out";
 "ZoomIn" = "Zoom in";
+"Play" = "Play";
+"Pause" = "Pause";
+"Mute" = "Mute";
+"Unmute" = "Unmute";
+"Volume" = "Volume";

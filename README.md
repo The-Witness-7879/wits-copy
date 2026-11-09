@@ -30,7 +30,8 @@ Wit's Copy checks for updates once a day. Turn this off, or check manually, in
 | Select / paste | Click selects; double-click pastes into the app you came from |
 | Copy / paste the selection | <kbd>↩</kbd> copies; <kbd>⌥</kbd><kbd>↩</kbd> pastes |
 | Pin / tag | <kbd>⌥</kbd><kbd>P</kbd> / <kbd>⌥</kbd><kbd>T</kbd>, or right-click a row |
-| Preview | <kbd>⌃</kbd><kbd>Space</kbd> |
+| Open / close the preview | Preview button in the toolbar (no default shortcut) |
+| Play / pause audio or video | <kbd>Space</kbd> while previewing media |
 | Settings | <kbd>⌘</kbd><kbd>,</kbd> |
 
 ## Privacy

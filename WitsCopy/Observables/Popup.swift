@@ -94,9 +94,14 @@ class Popup {
     KeyboardShortcuts.enable(.popup)
   }
 
+  /// The panel's own close() clears `panelPresented`; clearing it here first
+  /// would remove the content even when the panel defers the close.
   func close() {
-    AppState.shared.panelPresented = false
-    AppState.shared.appDelegate?.panel.close()
+    if let panel = AppState.shared.appDelegate?.panel {
+      panel.close()
+    } else {
+      AppState.shared.panelPresented = false
+    }
   }
 
   func isClosed() -> Bool {

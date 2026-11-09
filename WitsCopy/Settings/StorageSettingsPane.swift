@@ -58,6 +58,7 @@ struct StorageSettingsPane: View {
   @Default(.size) private var size
   @Default(.sortBy) private var sortBy
   @Default(.saveVideos) private var saveVideos
+  @Default(.saveAudio) private var saveAudio
 
   @State private var viewModel = ViewModel()
   @State private var storageSize = Storage.shared.size
@@ -72,7 +73,7 @@ struct StorageSettingsPane: View {
   var body: some View {
     SettingsLayout.form {
       SettingsLayout.row("Save", table: "StorageSettings") {
-        // Same order as the panel's type filter: text, image, video, file.
+        // Same order as the panel's type filter: text, image, video, audio, file.
         Toggle(
           isOn: $viewModel.saveText,
           label: { Text("Text", tableName: "StorageSettings") }
@@ -88,6 +89,11 @@ struct StorageSettingsPane: View {
           label: { Text("Videos", tableName: "StorageSettings") }
         )
         .iconHelp(NSLocalizedString("SaveVideosHelp", tableName: "StorageSettings", comment: ""))
+        Toggle(
+          isOn: $saveAudio,
+          label: { Text("Audio", tableName: "StorageSettings") }
+        )
+        .iconHelp(NSLocalizedString("SaveAudioHelp", tableName: "StorageSettings", comment: ""))
         Toggle(
           isOn: $viewModel.saveFiles,
           label: { Text("Files", tableName: "StorageSettings") }

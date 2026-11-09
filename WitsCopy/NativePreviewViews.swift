@@ -1,4 +1,6 @@
 import AppKit
+import AVKit
+import Defaults
 import PDFKit
 import QuickLookUI
 import SwiftUI
@@ -438,5 +440,279 @@ final class FittedImageHost: NSView {
       width: width,
       height: height
     )
+  }
+}
+
+// MARK: - Video and audio
+
+/// One volume for every player in the app. AVPlayer.volume is relative to the
+/// system output, so this never changes the Mac's own volume.
+enum MediaVolume {
+  static func apply(to player: AVPlayer) {
+    player.volume = Float(min(max(Defaults[.mediaVolume], 0), 1))
+    player.isMuted = Defaults[.mediaMuted]
+  }
+
+  static func store(volume: Float, muted: Bool) {
+    let clamped = Double(min(max(volume, 0), 1))
+    if abs(Defaults[.mediaVolume] - clamped) > 0.001 { Defaults[.mediaVolume] = clamped }
+    if Defaults[.mediaMuted] != muted { Defaults[.mediaMuted] = muted }
+  }
+}
+
+/// Playback state for the selected video or audio item. The controls are the
+/// app's own (icon buttons, system sliders) rather than AVKit's dark HUD, so
+/// they match the rest of the preview.
+@MainActor
+@Observable
+final class MediaPlayback {
+  /// The one live player; Space toggles it.
+  static weak var current: MediaPlayback?
+
+  let player: AVPlayer
+  let url: URL
+  private(set) var isPlaying = false
+  var position: Double = 0
+  private(set) var duration: Double = 0
+  var scrubbing = false
+  var volume: Double {
+    didSet {
+      player.volume = Float(volume)
+      if volume > 0, muted { muted = false }
+      MediaVolume.store(volume: Float(volume), muted: muted)
+    }
+  }
+  var muted: Bool {
+    didSet {
+      player.isMuted = muted
+      MediaVolume.store(volume: Float(volume), muted: muted)
+    }
+  }
+  @ObservationIgnored private var timeObserver: Any?
+  @ObservationIgnored private var endObserver: NSObjectProtocol?
+
+  /// `duration` comes from the asset load; the periodic observer only ticks
+  /// while playing, so a paused player would otherwise show 0:00.
+  init(url: URL, duration: Double? = nil, autoplay: Bool) {
+    self.url = url
+    player = AVPlayer(url: url)
+    self.duration = max(duration ?? 0, 0)
+    volume = min(max(Defaults[.mediaVolume], 0), 1)
+    muted = Defaults[.mediaMuted]
+    MediaVolume.apply(to: player)
+    timeObserver = player.addPeriodicTimeObserver(
+      forInterval: CMTime(value: 1, timescale: 4),
+      queue: .main
+    ) { [weak self] time in
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        if !self.scrubbing, time.isNumeric { self.position = time.seconds }
+        if let item = self.player.currentItem, item.duration.isNumeric {
+          self.duration = item.duration.seconds
+        }
+        self.isPlaying = self.player.timeControlStatus != .paused
+      }
+    }
+    endObserver = NotificationCenter.default.addObserver(
+      forName: .AVPlayerItemDidPlayToEndTime,
+      object: player.currentItem,
+      queue: .main
+    ) { [weak self] _ in
+      MainActor.assumeIsolated {
+        self?.isPlaying = false
+        self?.player.seek(to: .zero)
+        self?.position = 0
+      }
+    }
+    MediaPlayback.current = self
+    if autoplay { play() }
+  }
+
+  func play() {
+    player.play()
+    isPlaying = true
+    MediaPlayback.current = self
+  }
+
+  func pause() {
+    player.pause()
+    isPlaying = false
+  }
+
+  func toggle() { isPlaying ? pause() : play() }
+
+  func seek(to seconds: Double) {
+    position = seconds
+    player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+  }
+
+  func stop() {
+    player.pause()
+    if let timeObserver { player.removeTimeObserver(timeObserver) }
+    timeObserver = nil
+    if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+    endObserver = nil
+    player.replaceCurrentItem(with: nil)
+    isPlaying = false
+    if MediaPlayback.current === self { MediaPlayback.current = nil }
+  }
+
+  static func timeText(_ seconds: Double, reference: Double) -> String {
+    let value = seconds.isFinite ? max(0, Int(seconds.rounded(.down))) : 0
+    let h = value / 3600, m = (value % 3600) / 60, s = value % 60
+    return reference >= 3600 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+  }
+}
+
+/// Video surface only; the controls live in `MediaControlBar`.
+final class MediaPlayerHostView: NSView {
+  let playerView = AVPlayerView()
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    playerView.controlsStyle = .none
+    playerView.allowsPictureInPicturePlayback = false
+    playerView.videoGravity = .resizeAspect
+    playerView.frame = bounds
+    playerView.autoresizingMask = [.width, .height]
+    addSubview(playerView)
+    setAccessibilityElement(true)
+    setAccessibilityIdentifier("lab-media-player")
+  }
+
+  required init?(coder: NSCoder) { nil }
+}
+
+struct VideoSurface: NSViewRepresentable {
+  var player: AVPlayer
+
+  func makeNSView(context: Context) -> MediaPlayerHostView {
+    let view = MediaPlayerHostView(frame: .zero)
+    view.playerView.player = player
+    return view
+  }
+
+  func updateNSView(_ view: MediaPlayerHostView, context: Context) {
+    if view.playerView.player !== player { view.playerView.player = player }
+  }
+
+  static func dismantleNSView(_ view: MediaPlayerHostView, coordinator: ()) {
+    view.playerView.player = nil
+  }
+}
+
+/// Play/pause, elapsed, scrubber, total, mute and volume. Same icon buttons
+/// and hover chrome as the preview tool strip; no backing panel.
+struct MediaControlBar: View {
+  @Bindable var playback: MediaPlayback
+
+  var body: some View {
+    HStack(spacing: 8) {
+      ImmediateIconButton(
+        systemName: playback.isPlaying ? "pause.fill" : "play.fill",
+        help: NSLocalizedString(playback.isPlaying ? "Pause" : "Play", tableName: "PreviewItemView", comment: ""),
+        identifier: "lab-media-play",
+        label: NSLocalizedString(playback.isPlaying ? "Pause" : "Play", tableName: "PreviewItemView", comment: ""),
+        action: { playback.toggle() }
+      )
+      .frame(width: 28, height: 24)
+      .modifier(LabToolbarChrome(nativePassthrough: true))
+
+      Text(MediaPlayback.timeText(playback.position, reference: playback.duration))
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(.secondary)
+        .frame(minWidth: 34, alignment: .trailing)
+
+      Slider(
+        value: Binding(
+          get: { min(playback.position, max(playback.duration, 0.001)) },
+          set: { playback.position = $0 }
+        ),
+        in: 0...max(playback.duration, 0.001),
+        onEditingChanged: { editing in
+          playback.scrubbing = editing
+          if !editing { playback.seek(to: playback.position) }
+        }
+      )
+      .controlSize(.mini)
+      .disabled(playback.duration <= 0)
+      .accessibilityIdentifier("lab-media-scrubber")
+
+      Text(MediaPlayback.timeText(playback.duration, reference: playback.duration))
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(.secondary)
+        .frame(minWidth: 34, alignment: .leading)
+
+      ImmediateIconButton(
+        systemName: volumeSymbol,
+        help: NSLocalizedString(playback.muted ? "Unmute" : "Mute", tableName: "PreviewItemView", comment: ""),
+        identifier: "lab-media-mute",
+        label: NSLocalizedString(playback.muted ? "Unmute" : "Mute", tableName: "PreviewItemView", comment: ""),
+        action: { playback.muted.toggle() }
+      )
+      .frame(width: 28, height: 24)
+      .modifier(LabToolbarChrome(nativePassthrough: true))
+
+      Slider(value: $playback.volume, in: 0...1)
+        .controlSize(.mini)
+        .frame(width: 72)
+        .help(NSLocalizedString("Volume", tableName: "PreviewItemView", comment: ""))
+        .accessibilityIdentifier("lab-media-volume")
+    }
+    .frame(height: 24)
+  }
+
+  private var volumeSymbol: String {
+    if playback.muted || playback.volume <= 0.001 { return "speaker.slash.fill" }
+    if playback.volume < 0.34 { return "speaker.wave.1.fill" }
+    if playback.volume < 0.67 { return "speaker.wave.2.fill" }
+    return "speaker.wave.3.fill"
+  }
+}
+
+/// What the preview shows above an audio player: cover art when the file has
+/// one, otherwise a music glyph; then title and artist from the tags.
+struct AudioInfo: Equatable {
+  var title: String?
+  var artist: String?
+  var album: String?
+  var artwork: NSImage?
+  var duration: Double?
+
+  static func == (lhs: AudioInfo, rhs: AudioInfo) -> Bool {
+    lhs.title == rhs.title && lhs.artist == rhs.artist && lhs.album == rhs.album
+      && lhs.duration == rhs.duration && (lhs.artwork == nil) == (rhs.artwork == nil)
+  }
+}
+
+enum MediaInfoLoader {
+  /// Reads only container metadata and duration; nothing is decoded.
+  static func load(_ url: URL) async -> (playable: Bool, hasVideo: Bool, info: AudioInfo) {
+    let asset = AVURLAsset(url: url)
+    var info = AudioInfo()
+    let playable = (try? await asset.load(.isPlayable)) ?? false
+    let hasVideo = ((try? await asset.loadTracks(withMediaType: .video)) ?? []).isEmpty == false
+    if let duration = try? await asset.load(.duration), duration.isNumeric {
+      info.duration = duration.seconds
+    }
+    let items = (try? await asset.load(.commonMetadata)) ?? []
+    func string(_ key: AVMetadataKey) async -> String? {
+      guard let item = AVMetadataItem.metadataItems(from: items, withKey: key, keySpace: .common).first else { return nil }
+      return try? await item.load(.stringValue)
+    }
+    info.title = await string(.commonKeyTitle)
+    info.artist = await string(.commonKeyArtist)
+    info.album = await string(.commonKeyAlbumName)
+    if let art = AVMetadataItem.metadataItems(from: items, withKey: AVMetadataKey.commonKeyArtwork, keySpace: .common).first,
+       let data = try? await art.load(.dataValue) {
+      info.artwork = NSImage(data: data)
+    }
+    return (playable, hasVideo, info)
+  }
+
+  static func durationText(_ seconds: Double) -> String {
+    let total = Int(seconds.rounded())
+    let h = total / 3600, m = (total % 3600) / 60, s = total % 60
+    return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
   }
 }

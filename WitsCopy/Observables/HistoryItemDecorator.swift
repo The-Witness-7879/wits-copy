@@ -78,6 +78,8 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
       kind = NSLocalizedString("kind_image", comment: "")
     case .video:
       kind = NSLocalizedString("kind_video", comment: "")
+    case .audio:
+      kind = NSLocalizedString("kind_audio", comment: "")
     case .file:
       kind = NSLocalizedString("kind_file", comment: "")
     }

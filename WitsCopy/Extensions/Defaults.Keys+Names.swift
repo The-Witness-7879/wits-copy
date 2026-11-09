@@ -20,15 +20,32 @@ enum CaptureFilePolicy {
     case rejected
   }
 
-  static func decision(for item: NSPasteboardItem, filesEnabled: Bool, videosEnabled: Bool) -> Decision {
+  static func decision(
+    for item: NSPasteboardItem,
+    filesEnabled: Bool,
+    videosEnabled: Bool,
+    audioEnabled: Bool = true
+  ) -> Decision {
     guard item.types.contains(.fileURL) else { return .none }
     let url = item.string(forType: .fileURL).flatMap(URL.init(string:))
-    return decision(for: url, filesEnabled: filesEnabled, videosEnabled: videosEnabled)
+    return decision(for: url, filesEnabled: filesEnabled, videosEnabled: videosEnabled, audioEnabled: audioEnabled)
   }
 
-  static func decision(for url: URL?, filesEnabled: Bool, videosEnabled: Bool) -> Decision {
-    let isVideo = url.map(HistoryItem.isMovieFile) ?? false
-    return (isVideo ? videosEnabled : filesEnabled) ? .allowed : .rejected
+  static func decision(
+    for url: URL?,
+    filesEnabled: Bool,
+    videosEnabled: Bool,
+    audioEnabled: Bool = true
+  ) -> Decision {
+    let enabled: Bool
+    if url.map(HistoryItem.isMovieFile) == true {
+      enabled = videosEnabled
+    } else if url.map(HistoryItem.isAudioFile) == true {
+      enabled = audioEnabled
+    } else {
+      enabled = filesEnabled
+    }
+    return enabled ? .allowed : .rejected
   }
 }
 
@@ -50,6 +67,12 @@ extension Defaults.Keys {
   /// This switch decides movie-file URLs; `.fileURL` in enabledPasteboardTypes
   /// decides every other file.
   static let saveVideos = Key<Bool>("saveVideos", default: true, suite: preferencesSuite)
+  /// Same idea as `saveVideos`, for sound-only files.
+  static let saveAudio = Key<Bool>("saveAudio", default: true, suite: preferencesSuite)
+  /// One playback volume for every video and audio preview in the app,
+  /// separate from the system volume. 0…1, applied to AVPlayer.volume.
+  static let mediaVolume = Key<Double>("mediaVolume", default: 1, suite: preferencesSuite)
+  static let mediaMuted = Key<Bool>("mediaMuted", default: false, suite: preferencesSuite)
   static let highlightMatch = Key<HighlightMatch>("highlightMatch", default: .bold, suite: preferencesSuite)
   static let imageMaxHeight = Key<Int>("imageMaxHeight", default: 40, suite: preferencesSuite)
   static let menuIcon = Key<MenuIcon>("menuIcon", default: .clipboard, suite: preferencesSuite)

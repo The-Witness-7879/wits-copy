@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import ImageIO
+import UniformTypeIdentifiers
 import Vision
 import zlib
 
@@ -364,15 +365,22 @@ enum PreviewClassifier {
 
   private static func kind(forExtension ext: String, filename: String?) -> PreviewRenderKind {
     switch ext.lowercased() {
-    case "gif": return .gif
-    case "png", "jpg", "jpeg", "heic", "tif", "tiff", "bmp", "webp": return .image
+    case "gif", "ani": return .gif
+    case "png", "apng", "jpg", "jpeg", "heic", "tif", "tiff", "bmp", "webp", "svg", "cur", "ico", "icns":
+      return .image
     case "pdf": return .pdf
     case "doc", "docx", "docm": return .office
     case "md", "markdown", "mdown": return .markdown
     case "txt", "text", "log", "csv": return .plain
-    case "mov", "mp4", "m4v", "avi", "mkv", "mp3", "m4a", "wav", "aac", "aiff": return .media
+    case "mov", "mp4", "m4v", "avi", "mkv", "mpg", "mpeg", "3gp", "webm",
+         "mp3", "m4a", "m4b", "wav", "aac", "aif", "aiff", "caf", "flac", "ogg", "opus":
+      return .media
     default:
       if codeLanguage(filename: filename) != nil { return .code }
+      if GraphicFormats.imageIOExtensions.contains(ext.lowercased()) { return .image }
+      if let type = UTType(filenameExtension: ext), type.conforms(to: .audiovisualContent) {
+        return .media
+      }
       return .fallback
     }
   }
@@ -818,7 +826,7 @@ enum ImageProbe {
 
   static func downsample(data: Data, maxEdge: Int) -> CGImage? {
     guard let source = CGImageSourceCreateWithData(data as CFData, cacheOff) else { return nil }
-    return thumbnail(source: source, maxEdge: maxEdge)
+    return thumbnail(source: source, maxEdge: maxEdge, index: GraphicFormats.primaryIndex(source))
   }
 
   static func downsample(url: URL, maxEdge: Int, metrics: PreviewMetrics?) -> CGImage? {
@@ -836,7 +844,8 @@ enum ImageProbe {
   }
 
   static func pixelSize(source: CGImageSource) -> CGSize? {
-    guard let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+    let index = GraphicFormats.primaryIndex(source)
+    guard let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any] else {
       return nil
     }
     guard let width = number(props[kCGImagePropertyPixelWidth]),
@@ -892,9 +901,9 @@ struct GIFTimeline: Equatable, Sendable {
     for index in 0..<count {
       guard !Task.isCancelled else { return nil }
       let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
-      let gif = props?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
-      let unclamped = ImageProbe.number(gif?[kCGImagePropertyGIFUnclampedDelayTime]).map(Double.init)
-      let delay = ImageProbe.number(gif?[kCGImagePropertyGIFDelayTime]).map(Double.init)
+      let timing = GraphicFormats.frameDelay(props)
+      let unclamped = timing.unclamped
+      let delay = timing.delay
       let resolved = resolve(unclamped: unclamped, delay: delay)
       raw.append(unclamped ?? delay ?? 0)
       playback.append(resolved)
@@ -1527,5 +1536,197 @@ enum HTMLTextStrip {
       if !inTag { output.unicodeScalars.append(scalar) }
     }
     return output.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+}
+
+
+// MARK: - Graphic formats
+
+/// Files whose point is how they look: icons, cursors, vector art, animated
+/// images. Everything here is decoded by ImageIO or AppKit in process; nothing
+/// runs scripts or loads other files.
+enum GraphicFormats {
+  /// Extensions ImageIO on this system can decode (psd, tga, exr, dds, avif,
+  /// jxl, camera raw…), plus cursor and icon types it reads without a tag.
+  static let imageIOExtensions: Set<String> = {
+    var result: Set<String> = ["cur", "ico", "icns", "apng"]
+    for identifier in (CGImageSourceCopyTypeIdentifiers() as? [String]) ?? [] {
+      if let type = UTType(identifier) {
+        result.formUnion(type.tags[.filenameExtension] ?? [])
+      }
+    }
+    return result
+  }()
+
+  private static let animationKeys: [(CFString, CFString, CFString)] = [
+    (kCGImagePropertyGIFDictionary, kCGImagePropertyGIFUnclampedDelayTime, kCGImagePropertyGIFDelayTime),
+    (kCGImagePropertyPNGDictionary, kCGImagePropertyAPNGUnclampedDelayTime, kCGImagePropertyAPNGDelayTime),
+    (kCGImagePropertyWebPDictionary, kCGImagePropertyWebPUnclampedDelayTime, kCGImagePropertyWebPDelayTime),
+    (kCGImagePropertyHEICSDictionary, kCGImagePropertyHEICSUnclampedDelayTime, kCGImagePropertyHEICSDelayTime)
+  ]
+
+  static func frameDelay(_ props: [CFString: Any]?) -> (unclamped: Double?, delay: Double?) {
+    for (dictionary, unclampedKey, delayKey) in animationKeys {
+      guard let frame = props?[dictionary] as? [CFString: Any] else { continue }
+      let unclamped = ImageProbe.number(frame[unclampedKey]).map(Double.init)
+      let delay = ImageProbe.number(frame[delayKey]).map(Double.init)
+      if unclamped != nil || delay != nil { return (unclamped, delay) }
+    }
+    return (nil, nil)
+  }
+
+  /// More than one frame with frame timing: GIF, APNG, animated WebP/HEICS.
+  /// An .ico with several sizes has several images but no timing.
+  static func isAnimated(_ source: CGImageSource) -> Bool {
+    guard CGImageSourceGetCount(source) > 1 else { return false }
+    let props = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+    let timing = frameDelay(props)
+    return timing.unclamped != nil || timing.delay != nil
+  }
+
+  static func isAnimated(data: Data) -> Bool {
+    guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary) else {
+      return false
+    }
+    return isAnimated(source)
+  }
+
+  /// Icons and cursors keep several sizes; show the largest, not the first.
+  static func primaryIndex(_ source: CGImageSource) -> Int {
+    let count = CGImageSourceGetCount(source)
+    guard count > 1, count <= 64, !isAnimated(source) else { return 0 }
+    var best = 0
+    var bestArea: CGFloat = -1
+    for index in 0..<count {
+      let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
+      let area = (ImageProbe.number(props?[kCGImagePropertyPixelWidth]) ?? 0)
+        * (ImageProbe.number(props?[kCGImagePropertyPixelHeight]) ?? 0)
+      if area > bestArea {
+        best = index
+        bestArea = area
+      }
+    }
+    return best
+  }
+
+  // MARK: SVG
+
+  static func isSVG(_ data: Data) -> Bool {
+    let head = String(decoding: data.prefix(1_024), as: UTF8.self).lowercased()
+    return head.contains("<svg")
+  }
+
+  /// AppKit's own SVG renderer, rasterized sharp for the preview canvas.
+  /// Returns the image and the drawing's intrinsic size.
+  static func rasterizeSVG(_ data: Data, maxEdge: Int) -> (image: CGImage, size: CGSize)? {
+    guard isSVG(data), let image = NSImage(data: data) else { return nil }
+    let intrinsic = image.size
+    guard intrinsic.width > 0, intrinsic.height > 0 else { return nil }
+    let longest = max(intrinsic.width, intrinsic.height)
+    let target = min(CGFloat(maxEdge), max(longest * 2, 1_024))
+    let scale = target / longest
+    let width = max(1, Int((intrinsic.width * scale).rounded()))
+    let height = max(1, Int((intrinsic.height * scale).rounded()))
+    guard let context = CGContext(
+      data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+      space: CGColorSpace(name: CGColorSpace.sRGB)!,
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else { return nil }
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+    image.draw(in: NSRect(x: 0, y: 0, width: width, height: height))
+    NSGraphicsContext.restoreGraphicsState()
+    guard let cg = context.makeImage() else { return nil }
+    return (cg, intrinsic)
+  }
+
+  // MARK: Animated cursor (.ani)
+
+  static func isAnimatedCursor(_ data: Data) -> Bool {
+    data.count > 12 && data.prefix(4) == Data("RIFF".utf8) && data[8..<12] == Data("ACON".utf8)
+  }
+
+  /// Windows animated cursor: a RIFF of icon frames with jiffy (1/60 s) timing.
+  /// Re-encoded as an animated PNG so the regular animated-image player runs it.
+  static func animatedCursorAsPNG(_ data: Data, maxFrames: Int = 512) -> Data? {
+    guard isAnimatedCursor(data) else { return nil }
+    let bytes = [UInt8](data)
+    func u32(_ at: Int) -> Int {
+      guard at + 4 <= bytes.count else { return 0 }
+      return Int(bytes[at]) | Int(bytes[at + 1]) << 8 | Int(bytes[at + 2]) << 16 | Int(bytes[at + 3]) << 24
+    }
+    func tag(_ at: Int) -> String { String(decoding: bytes[at..<min(at + 4, bytes.count)], as: UTF8.self) }
+    var frames: [Data] = []
+    var rates: [Int] = []
+    var sequence: [Int] = []
+    var steps = 0
+    var displayRate = 6
+    var iconFrames = true
+    func walk(_ start: Int, _ end: Int) {
+      var at = start
+      while at + 8 <= end {
+        let id = tag(at)
+        let size = u32(at + 4)
+        let body = at + 8
+        guard size >= 0, body + size <= end else { return }
+        switch id {
+        case "anih" where size >= 36:
+          steps = u32(body + 8)
+          displayRate = max(u32(body + 28), 1)
+          iconFrames = (u32(body + 32) & 1) == 1
+        case "rate":
+          rates = stride(from: body, to: body + size - 3, by: 4).map(u32)
+        case "seq ":
+          sequence = stride(from: body, to: body + size - 3, by: 4).map(u32)
+        case "LIST" where size >= 4 && tag(body) == "fram":
+          walk(body + 4, body + size)
+        case "icon":
+          if frames.count < maxFrames { frames.append(Data(bytes[body..<(body + size)])) }
+        default:
+          break
+        }
+        at = body + size + (size & 1)
+      }
+    }
+    walk(12, min(bytes.count, u32(4) + 8))
+    guard iconFrames, !frames.isEmpty else { return nil }
+    let images: [CGImage] = frames.compactMap { frame in
+      guard let source = CGImageSourceCreateWithData(frame as CFData, nil) else { return nil }
+      return CGImageSourceCreateImageAtIndex(source, primaryIndex(source), nil)
+    }
+    guard images.count == frames.count else { return nil }
+    let order = (0..<min(max(steps, 1), maxFrames)).map { step in
+      sequence.indices.contains(step) ? sequence[step] : step % images.count
+    }.filter { images.indices.contains($0) }
+    guard !order.isEmpty else { return nil }
+    let width = images.map(\.width).max() ?? 1
+    let height = images.map(\.height).max() ?? 1
+    let output = NSMutableData()
+    guard let destination = CGImageDestinationCreateWithData(output, UTType.png.identifier as CFString, order.count, nil) else {
+      return nil
+    }
+    CGImageDestinationSetProperties(destination, [
+      kCGImagePropertyPNGDictionary: [kCGImagePropertyAPNGLoopCount: 0]
+    ] as CFDictionary)
+    for (step, index) in order.enumerated() {
+      let jiffies = rates.indices.contains(step) ? max(rates[step], 1) : displayRate
+      let delay = Double(jiffies) / 60
+      guard let canvas = CGContext(
+        data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+      ) else { return nil }
+      let image = images[index]
+      canvas.draw(image, in: CGRect(x: 0, y: height - image.height, width: image.width, height: image.height))
+      guard let frame = canvas.makeImage() else { return nil }
+      CGImageDestinationAddImage(destination, frame, [
+        kCGImagePropertyPNGDictionary: [
+          kCGImagePropertyAPNGDelayTime: delay,
+          kCGImagePropertyAPNGUnclampedDelayTime: delay
+        ]
+      ] as CFDictionary)
+    }
+    guard CGImageDestinationFinalize(destination) else { return nil }
+    return output as Data
   }
 }

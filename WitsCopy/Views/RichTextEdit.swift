@@ -1068,6 +1068,12 @@ struct RichTextEditBox: NSViewRepresentable {
     textView.isHorizontallyResizable = !wraps
     let viewport = scroll.contentSize.width
     let tracked = viewport > 1 ? viewport : max(textView.bounds.width, 1)
+    // Turning wrap on after an unwrapped layout: the view has already grown to
+    // the longest line, and a width-tracking container would follow that
+    // width and never fold. Shrink the view back to the viewport first.
+    if wraps, textView.frame.width > tracked + 0.5 {
+      textView.setFrameSize(NSSize(width: tracked, height: textView.frame.height))
+    }
     textView.textContainer?.containerSize = NSSize(
       width: wraps ? tracked : CGFloat.greatestFiniteMagnitude,
       height: CGFloat.greatestFiniteMagnitude

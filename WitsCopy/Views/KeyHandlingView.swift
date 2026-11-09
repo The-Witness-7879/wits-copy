@@ -40,12 +40,17 @@ struct KeyHandlingView<Content: View>: View {
           return .ignored
         }
 
+        // A bare Space used to toggle the preview column. It collapsed the
+        // column holding keyboard focus, so the next Space reached nothing and
+        // never reopened it. The preview is toggled by its toolbar button only;
+        // Space plays or pauses the selected video or audio.
         if !searchFocused,
+           let playback = MediaPlayback.current,
            let event = NSApp.currentEvent,
            event.type == .keyDown,
            Sauce.shared.key(for: Int(event.keyCode)) == .space,
            event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
-          appState.preview.togglePreview()
+          playback.toggle()
           return .handled
         }
 

@@ -173,6 +173,40 @@ final class InputStabilityTests: XCTestCase {
     XCTAssertFalse(RowPointerDrag.exceeded(dx: 2, dy: 2))
   }
 
+  /// The resize band sits a few points outside the frame. A press there is
+  /// delivered to the panel and must not count as an outside click; closing
+  /// then left an empty, inert glass frame on screen for the whole resize.
+  @MainActor
+  func testPressInTheResizeBandOutsideTheFrameDoesNotDismiss() throws {
+    var hides = 0
+    let panel = offscreenPanel { hides += 1 }
+    let pinned = AppState.shared.windowPinned
+    defer {
+      panel.close()
+      AppState.shared.windowPinned = pinned
+    }
+    panel.isPresented = true
+    AppState.shared.windowPinned = false
+    func press(windowNumber: Int, timestamp: TimeInterval) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.mouseEvent(
+        with: .leftMouseDown,
+        location: NSPoint(x: 20, y: -3),
+        modifierFlags: [],
+        timestamp: timestamp,
+        windowNumber: windowNumber,
+        context: nil,
+        eventNumber: Int(timestamp),
+        clickCount: 1,
+        pressure: 1
+      ))
+    }
+    let own = try press(windowNumber: panel.windowNumber, timestamp: 41)
+    XCTAssertTrue(own.window === panel, "probe event is not addressed to the panel")
+    _ = panel.localBrowsingEvent(own)
+    XCTAssertEqual(hides, 0, "a press in the panel's own resize band closed it")
+    XCTAssertTrue(panel.isPresented)
+  }
+
   @MainActor
   func testLocalMonitorRouteKeepsConsumedNil() throws {
     let front = NSWorkspace.shared.frontmostApplication?.processIdentifier

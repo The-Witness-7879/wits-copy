@@ -17,7 +17,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   }()
 
   private var isStatusItemDisabled: Bool {
-    Defaults[.enabledPasteboardTypes].isEmpty && !Defaults[.saveVideos]
+    Defaults[.enabledPasteboardTypes].isEmpty && !Defaults[.saveVideos] && !Defaults[.saveAudio]
   }
 
   private var statusItemVisibilityObserver: NSKeyValueObservation?
@@ -77,7 +77,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     Task {
-      for await _ in Defaults.updates([.enabledPasteboardTypes, .saveVideos]) {
+      for await _ in Defaults.updates([.enabledPasteboardTypes, .saveVideos, .saveAudio]) {
         statusItem.button?.appearsDisabled = isStatusItemDisabled
       }
     }
@@ -208,6 +208,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         types.formUnion(StorageType.images.types)
       }
       Defaults[.enabledPasteboardTypes] = types
+    }
+    ensureMigration(key: "2026-11-09-no-preview-shortcut") {
+      // The old ⌃Space default was stored on first launch; drop it so the
+      // preview has no shortcut, matching the new default.
+      KeyboardShortcuts.setShortcut(nil, for: .togglePreview)
     }
 
     // The following defaults are not used in Maccy 2.x

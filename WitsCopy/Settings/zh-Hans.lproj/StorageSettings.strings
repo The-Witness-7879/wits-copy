@@ -17,6 +17,8 @@
 "SizeStepperHelp" = "调整保留的历史条数。";
 "Videos" = "视频";
 "SaveVideosHelp" = "记录复制的视频文件。只保存路径，不备份文件。";
+"Audio" = "音频";
+"SaveAudioHelp" = "记录复制的音频文件。只保存路径，不备份文件。";
 
 "HistoryUsage" = "历史占用：";
 "HistoryUsageDescription" = "WitsCopy 历史数据库占用的磁盘空间。";
