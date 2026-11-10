@@ -98,6 +98,7 @@
 		E1D0C0212F10260000A11CE2 /* PinShortcutRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1D0C0202F10260000A11CE2 /* PinShortcutRecorder.swift */; };
 		E1D0C0232F10260000A11CE2 /* OriginalTextEdit.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1D0C0222F10260000A11CE2 /* OriginalTextEdit.swift */; };
 		F11E00022F11020000A11CE3 /* RefinementContracts.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11E00012F11020000A11CE3 /* RefinementContracts.swift */; };
+		F11E00A22F11020000A11CE8 /* PreviewOpenTarget.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11E00A12F11020000A11CE8 /* PreviewOpenTarget.swift */; };
 		F11E00042F11020000A11CE3 /* RefinementUIContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11E00032F11020000A11CE3 /* RefinementUIContractTests.swift */; };
 		F11E00122F11020000A11CE4 /* WorkspaceTagDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11E00112F11020000A11CE4 /* WorkspaceTagDirectory.swift */; };
 		57C120000000000000000004 /* WorkspaceTagViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57C120000000000000000003 /* WorkspaceTagViews.swift */; };
@@ -295,6 +296,7 @@
 		E1D0C0202F10260000A11CE2 /* PinShortcutRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinShortcutRecorder.swift; sourceTree = "<group>"; };
 		E1D0C0222F10260000A11CE2 /* OriginalTextEdit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OriginalTextEdit.swift; sourceTree = "<group>"; };
 		F11E00012F11020000A11CE3 /* RefinementContracts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefinementContracts.swift; sourceTree = "<group>"; };
+		F11E00A12F11020000A11CE8 /* PreviewOpenTarget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewOpenTarget.swift; sourceTree = "<group>"; };
 		F11E00032F11020000A11CE3 /* RefinementUIContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RefinementUIContractTests.swift; sourceTree = "<group>"; };
 		F11E00112F11020000A11CE4 /* WorkspaceTagDirectory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTagDirectory.swift; sourceTree = "<group>"; };
 		57C120000000000000000003 /* WorkspaceTagViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceTagViews.swift; sourceTree = "<group>"; };
@@ -675,6 +677,7 @@
 				DA243D132C2F66DD0012A27F /* Storage.swift */,
 				C0FFEE0000000000000000C1 /* LabSmokeCanvas.swift */,
 				F11E00012F11020000A11CE3 /* RefinementContracts.swift */,
+				F11E00A12F11020000A11CE8 /* PreviewOpenTarget.swift */,
 				F11E00112F11020000A11CE4 /* WorkspaceTagDirectory.swift */,
 				57C120000000000000000003 /* WorkspaceTagViews.swift */,
 				57C120000000000000000001 /* WorkspaceTagAppearance.swift */,
@@ -915,6 +918,7 @@
 				DA243D142C2F66DD0012A27F /* Storage.swift in Sources */,
 				C0FFEE0000000000000000C2 /* LabSmokeCanvas.swift in Sources */,
 				F11E00022F11020000A11CE3 /* RefinementContracts.swift in Sources */,
+				F11E00A22F11020000A11CE8 /* PreviewOpenTarget.swift in Sources */,
 				F11E00122F11020000A11CE4 /* WorkspaceTagDirectory.swift in Sources */,
 				57C120000000000000000004 /* WorkspaceTagViews.swift in Sources */,
 				57C120000000000000000002 /* WorkspaceTagAppearance.swift in Sources */,
@@ -1334,7 +1338,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2026110921;
+				CURRENT_PROJECT_VERSION = 2026111008;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = MN3X4648SC;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1349,7 +1353,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.1;
+				MARKETING_VERSION = 0.2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = local.thewitness.WitsCopy;
 				PRODUCT_NAME = WitsCopy;
 				PRODUCT_MODULE_NAME = WitsCopy;
@@ -1370,7 +1374,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 2026110921;
+				CURRENT_PROJECT_VERSION = 2026111008;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = MN3X4648SC;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -1385,7 +1389,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
-				MARKETING_VERSION = 0.2.1;
+				MARKETING_VERSION = 0.2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = local.thewitness.WitsCopy;
 				PRODUCT_NAME = WitsCopy;
 				PRODUCT_MODULE_NAME = WitsCopy;

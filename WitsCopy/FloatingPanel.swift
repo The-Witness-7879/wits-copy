@@ -2,6 +2,26 @@ import ApplicationServices
 import Defaults
 import SwiftUI
 
+/// The pointer that is being handled is still pressed on our window.
+///
+/// Measured on macOS 27 with real HID clicks (scratch repro, 2026-11-10):
+/// `orderOut` while the button is held clears `isVisible`, but WindowServer
+/// keeps the window on screen after the release, so dropping the content
+/// leaves a bare glass frame. `preventWindowOrdering()` does not change that;
+/// running the same `orderOut` after the mouse-up does. Ordering out must
+/// therefore wait for the release.
+enum PanelEventOrdering {
+  static func defersWindowOrdering(_ event: NSEvent?) -> Bool {
+    switch event?.type {
+    case .leftMouseDown, .rightMouseDown, .otherMouseDown,
+         .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+      return true
+    default:
+      return false
+    }
+  }
+}
+
 /// Focus recorded before the panel is shown. The window title is diagnostic only;
 /// paste never searches for another window or field by title.
 struct PasteFocusSnapshot: Equatable, Sendable {
@@ -260,13 +280,20 @@ final class BrowsingEscapeTap {
 
 class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKeyWindow, BrowsingEscapeTapClient {
   var isPresented: Bool = false
+  /// Bumped on every `open()`. A close deferred past a mouse-down only runs
+  /// while this still matches, so it cannot hide a panel opened since.
+  private var presentationGeneration = 0
+  /// A close is waiting for the pressed pointer to be released.
+  private var closeAwaitsRelease = false
+  /// Work that must not run until the pressed pointer is released, in order.
+  private var releaseWork: [() -> Void] = []
+  private var releaseMonitor: Any?
+  private var releaseTimer: Timer?
   var statusBarButton: NSStatusBarButton?
   let onClose: () -> Void
   /// Set while applying the frame back into the split, so a hosting-view
   /// layout pass cannot re-enter and write a stale width.
   private var isSyncingSplit = false
-  /// A close requested mid-resize; performed when the resize ends.
-  private var closesAfterLiveResize = false
   /// 上一次拖动中的 frame，用来判断用户拖的是哪条边。
   private var lastLiveFrame: CGRect?
   /// True only after the user clicks search, the original-text editor, or the
@@ -370,6 +397,10 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKey
 
   deinit {
     removeBrowsingInputMonitors()
+    if let releaseMonitor {
+      NSEvent.removeMonitor(releaseMonitor)
+    }
+    releaseTimer?.invalidate()
   }
 
   func toggle(height: CGFloat, at popupPosition: PopupPosition = Defaults[.popupPosition]) {
@@ -381,6 +412,8 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKey
   }
 
   func open(height: CGFloat, at popupPosition: PopupPosition = Defaults[.popupPosition]) {
+    presentationGeneration &+= 1
+    closeAwaitsRelease = false
     didStartPresentation = false
     capturePasteTarget()
     Clipboard.shared.resetExplicitPasteClaim()
@@ -601,10 +634,6 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKey
     AppState.shared.preview.currentHeight = frame.height
     AppState.shared.preview.endResize()
     saveWindowPosition()
-    if closesAfterLiveResize {
-      closesAfterLiveResize = false
-      close()
-    }
   }
 
   func windowDidBecomeKey(_ notification: Notification) {
@@ -750,18 +779,75 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKey
   }
 
   override func close() {
-    // AppKit keeps a window on screen while it is being resized, so closing
-    // now would only drop the content and leave an empty glass frame that
-    // takes no input. Finish the close once the resize ends.
-    if inLiveResize {
-      closesAfterLiveResize = true
+    if PanelEventOrdering.defersWindowOrdering(NSApp.currentEvent) {
+      guard !closeAwaitsRelease else { return }
+      closeAwaitsRelease = true
+      let generation = presentationGeneration
+      afterPointerRelease { [weak self] in
+        guard let self else { return }
+        self.closeAwaitsRelease = false
+        guard self.presentationGeneration == generation else { return }
+        self.finishClose()
+      }
       return
     }
+    finishClose()
+  }
+
+  /// Runs `work` once the press being handled is released, or right away when
+  /// no press is in flight. Queued work runs in the order it was added, after
+  /// the mouse-up has been dispatched. A held button keeps it waiting; the
+  /// timer only covers a mouse-up that a tracking loop swallowed.
+  func afterPointerRelease(_ work: @escaping () -> Void) {
+    guard PanelEventOrdering.defersWindowOrdering(NSApp.currentEvent) || !releaseWork.isEmpty else {
+      work()
+      return
+    }
+    releaseWork.append(work)
+    guard releaseMonitor == nil, releaseTimer == nil else { return }
+    releaseMonitor = NSEvent.addLocalMonitorForEvents(
+      matching: [.leftMouseUp, .rightMouseUp, .otherMouseUp]
+    ) { [weak self] event in
+      self?.pointerReleased()
+      return event
+    }
+    var releasedTicks = 0
+    let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+      // Two quiet ticks: the mouse-up normally reaches the monitor first.
+      releasedTicks = NSEvent.pressedMouseButtons == 0 ? releasedTicks + 1 : 0
+      guard releasedTicks >= 2 else { return }
+      self?.pointerReleased()
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    releaseTimer = timer
+  }
+
+  /// The mouse-up is still being dispatched here; the work runs after it.
+  private func pointerReleased() {
+    if let releaseMonitor {
+      NSEvent.removeMonitor(releaseMonitor)
+    }
+    releaseMonitor = nil
+    releaseTimer?.invalidate()
+    releaseTimer = nil
+    let work = releaseWork
+    releaseWork = []
+    guard !work.isEmpty else { return }
+    DispatchQueue.main.async {
+      work.forEach { $0() }
+    }
+  }
+
+  /// Order the window out before removing its content. `panelPresented = false`
+  /// leaves only the glass view; doing that while the window is still on screen
+  /// is the empty frame.
+  private func finishClose() {
+    guard isPresented || isVisible || AppState.shared.panelPresented else { return }
     removeBrowsingInputMonitors()
     acceptsKeyForEditing = false
-    AppState.shared.panelPresented = false
-    contentView?.layoutSubtreeIfNeeded()
+    orderOut(nil)
     super.close()
+    AppState.shared.panelPresented = false
     isPresented = false
     statusBarButton?.isHighlighted = false
     onClose()

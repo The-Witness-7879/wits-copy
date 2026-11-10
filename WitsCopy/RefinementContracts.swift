@@ -2,6 +2,7 @@ import Foundation
 
 enum PreviewToolKind: String, Equatable {
   case wrap
+  case open
   case lineNumbers
   case recognize
   case pdfZoomOut
@@ -14,12 +15,16 @@ enum PreviewToolKind: String, Equatable {
 enum PreviewToolStrip {
   /// Tools that belong in the strip above the canvas. Empty means no strip,
   /// so the row cannot cover content that has no tools.
-  static func tools(kind: String, hasSystemURL: Bool = false) -> [PreviewToolKind] {
+  static func tools(
+    kind: String,
+    hasSystemURL: Bool = false,
+    hasOpenTarget: Bool = false
+  ) -> [PreviewToolKind] {
     switch kind {
     case "plain", "markdown":
-      return [.wrap]
+      return hasOpenTarget ? [.wrap, .open] : [.wrap]
     case "code":
-      return [.wrap, .lineNumbers]
+      return hasOpenTarget ? [.wrap, .open, .lineNumbers] : [.wrap, .lineNumbers]
     case "image", "gif":
       return [.recognize]
     case "pdf":

@@ -154,6 +154,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
           fputs("WitsCopy smoke ready\n", stdout)
         }
+        if LabRuntime.isLinkSmoke,
+           let link = AppState.shared.history.items.first(where: { $0.title.hasPrefix("https://") }) {
+          AppState.shared.navigator.select(item: link)
+          fputs("WitsCopy link smoke selected window=\(self.panel.windowNumber)\n", stdout)
+        }
         if LabRuntime.isImageSmoke, let big = AppState.shared.history.items.first(where: { $0.title == "合成大图" }) {
           AppState.shared.navigator.select(item: big)
           fputs("WitsCopy image smoke selected=\(big.title)\n", stdout)

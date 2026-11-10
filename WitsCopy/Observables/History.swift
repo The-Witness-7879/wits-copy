@@ -781,6 +781,9 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     textItem("Standup notes for Monday", application: "com.apple.TextEdit")
     textItem("#release-2.7 checklist", application: "com.apple.TextEdit")
     textItem("Wi-Fi lab-guest", pin: "w", tags: ["net"], application: "com.apple.finder")
+    if LabRuntime.isLinkSmoke {
+      textItem("https://example.com/wits-copy-smoke", application: "com.apple.Safari")
+    }
     installSmokeRichText()
     installSmokeImage()
     installSmokeFiles()

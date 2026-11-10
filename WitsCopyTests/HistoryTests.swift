@@ -1388,11 +1388,18 @@ final class WorkspacePolicyTests: XCTestCase {
       (.externalClick, pinned, .stay),
       (.copyCommit, plain, .close),
       (.copyCommit, pinned, .stay),
+      (.externalHandoff, plain, .close),
+      (.externalHandoff, pinned, .stay),
       (.escape, pinned, .close),
       (.explicit, pinned, .close),
       (.settings, plain, .close),
       (.settings, pinned, .stayAndYieldToSettings)
     ]
+    XCTAssertTrue(PanelEventOrdering.defersWindowOrdering(.mouseEvent(
+      with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+      windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+    )))
+    XCTAssertFalse(PanelEventOrdering.defersWindowOrdering(nil))
     for row in rows {
       XCTAssertEqual(PanelClosePolicy.decide(row.0, context: row.1), row.2, "\(row.0) \(row.1)")
     }
@@ -1903,6 +1910,30 @@ final class WorkspacePolicyTests: XCTestCase {
     button.menuProvider = { (NSMenu(), []) }
     button.setAccessibilityRole(.popUpButton)
     XCTAssertEqual(button.accessibilityRole(), .popUpButton)
+  }
+
+  func testCloseDuringLiveResizeStillHidesThePanelAndClearsPresentation() {
+    let panel = LiveResizeClosePanel(
+      contentRect: NSRect(x: -20_000, y: -20_000, width: 400, height: 300),
+      onClose: {},
+      view: { EmptyView() }
+    )
+    panel.orderFront(nil)
+    panel.isPresented = true
+    AppState.shared.panelPresented = true
+    defer {
+      panel.orderOut(nil)
+      panel.isPresented = false
+      AppState.shared.panelPresented = false
+    }
+
+    XCTAssertTrue(panel.inLiveResize)
+    XCTAssertTrue(panel.isVisible)
+    panel.close()
+
+    XCTAssertFalse(panel.isVisible, "deferred close left an empty glass frame on screen")
+    XCTAssertFalse(panel.isPresented)
+    XCTAssertFalse(AppState.shared.panelPresented)
   }
 
   func testActionButtonHitPrefersTheButtonOverAScroller() {
@@ -3521,6 +3552,10 @@ private struct AccessNode {
   var id: String
   var frame: CGRect
   var text: String
+}
+
+private final class LiveResizeClosePanel: FloatingPanel<EmptyView> {
+  override var inLiveResize: Bool { true }
 }
 
 /// Real FloatingPanel, full product root, offscreen. Ordering and key are refused

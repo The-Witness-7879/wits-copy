@@ -8,6 +8,9 @@ enum PanelDismissReason: Equatable, Sendable {
   case resignKey
   case externalClick
   case copyCommit
+  /// Opening the item in its own app. Same contract as copying: an unpinned
+  /// panel hides; a pinned panel stays.
+  case externalHandoff
   case escape
   case explicit
   case settings
@@ -165,7 +168,7 @@ enum PanelClosePolicy {
         return .stay
       }
       return .close
-    case .copyCommit:
+    case .copyCommit, .externalHandoff:
       return context.windowPinned ? .stay : .close
     }
   }

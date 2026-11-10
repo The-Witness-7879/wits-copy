@@ -28,6 +28,9 @@
 "WrapLines" = "自动换行";
 "LineNumbers" = "行号";
 "OpenSystemPreview" = "打开系统预览";
+"OpenInBrowser" = "在默认浏览器中打开";
+"RevealInFinder" = "在访达中显示";
+"OpenInFinder" = "在访达中打开";
 "SystemPreviewUnavailable" = "系统预览不可用";
 "OfficeExtractedBody" = "以下是提取的正文。版式由系统 Quick Look 提供，不是这段文字。";
 "RemoteImageSkipped" = "未加载远程图片";

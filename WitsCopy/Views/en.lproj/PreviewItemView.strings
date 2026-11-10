@@ -28,6 +28,9 @@
 "WrapLines" = "Wrap lines";
 "LineNumbers" = "Line numbers";
 "OpenSystemPreview" = "Open system preview";
+"OpenInBrowser" = "Open in default browser";
+"RevealInFinder" = "Reveal in Finder";
+"OpenInFinder" = "Open in Finder";
 "SystemPreviewUnavailable" = "System preview is unavailable";
 "OfficeExtractedBody" = "Extracted body. Layout comes from system Quick Look, not from this text.";
 "RemoteImageSkipped" = "Remote image not loaded";

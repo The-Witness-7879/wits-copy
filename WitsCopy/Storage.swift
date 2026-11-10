@@ -71,8 +71,14 @@ enum LabRuntime {
     CommandLine.arguments.contains("--lab-reopen-smoke")
   }
 
+  /// Adds one synthetic link and selects it, so the preview's open button can
+  /// be clicked for real. Still isolated: no pasteboard read and no real history.
+  static var isLinkSmoke: Bool {
+    CommandLine.arguments.contains("--lab-link-smoke")
+  }
+
   static var isSmoke: Bool {
-    CommandLine.arguments.contains("--lab-smoke") || isEditorSmoke || isPreviewSmoke || isReopenSmoke || isManySmoke || isNarrowSmoke || isAliasSmoke || isImageSmoke || isRichSmoke
+    CommandLine.arguments.contains("--lab-smoke") || isEditorSmoke || isPreviewSmoke || isReopenSmoke || isManySmoke || isNarrowSmoke || isAliasSmoke || isImageSmoke || isRichSmoke || isLinkSmoke
   }
 
   static var isEnableTesting: Bool {

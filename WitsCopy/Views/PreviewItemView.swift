@@ -19,6 +19,9 @@ final class PreviewModel {
   var pdfScale: CGFloat = 1
   var officeText: String?
   var systemURL: URL?
+  /// Set only from the text that was copied directly, never from the body of
+  /// a text file: a path inside a document is content, not a destination.
+  var openTarget: PreviewOpenTarget?
   /// Video and audio: nil while the file is being looked at, then whether
   /// AVKit can play it. Unplayable media falls back to Quick Look.
   var mediaPlayable: Bool?
@@ -144,6 +147,7 @@ final class PreviewModel {
     pdfPageCount = 0
     officeText = nil
     systemURL = nil
+    openTarget = nil
     mediaPlayable = nil
     mediaHasVideo = false
     audioInfo = AudioInfo()
@@ -171,6 +175,9 @@ final class PreviewModel {
     session: PreviewSession,
     mode: PreviewTextMode?
   ) async {
+    // Only the copied text counts. What a text file contains is the item's
+    // body, so a path inside it must not become a jump target.
+    openTarget = PreviewOpenTarget.resolve(source.text)
     var text = source.text ?? ""
     var truncated = false
     if text.isEmpty, let url = selectedURL(source, fileIndex) {
@@ -545,7 +552,8 @@ struct PreviewItemView: View {
   private var previewTools: some View {
     let tools = PreviewToolStrip.tools(
       kind: model.kind.rawValue,
-      hasSystemURL: model.systemURL != nil
+      hasSystemURL: model.systemURL != nil,
+      hasOpenTarget: model.openTarget != nil
     )
     if !tools.isEmpty {
       HStack(spacing: 8) {
@@ -557,6 +565,16 @@ struct PreviewItemView: View {
             label: NSLocalizedString("WrapLines", tableName: "PreviewItemView", comment: ""),
             tint: wraps ? .controlAccentColor : .secondaryLabelColor,
             action: { toggleWraps() }
+          )
+        }
+        if tools.contains(.open), let target = model.openTarget {
+          let help = openHelp(target)
+          toolButton(
+            systemName: openSymbolName(target),
+            help: help,
+            identifier: "lab-open-target",
+            label: help,
+            action: { openTarget(target) }
           )
         }
         if tools.contains(.lineNumbers) {
@@ -656,6 +674,60 @@ struct PreviewItemView: View {
     )
     .frame(width: 28, height: 24)
     .modifier(LabToolbarChrome(nativePassthrough: true))
+  }
+
+  private func openSymbolName(_ target: PreviewOpenTarget) -> String {
+    switch target {
+    case .web: return "link"
+    case .file: return "folder"
+    }
+  }
+
+  private func openHelp(_ target: PreviewOpenTarget) -> String {
+    let key: String
+    switch target {
+    case .web: key = "OpenInBrowser"
+    case .file(_, isDirectory: true): key = "OpenInFinder"
+    case .file: key = "RevealInFinder"
+    }
+    return NSLocalizedString(key, tableName: "PreviewItemView", comment: "")
+  }
+
+  /// A page and a folder both belong to their default app. A file inside a
+  /// folder is better shown than launched, so Finder selects it.
+  /// An unpinned panel hides before the other app comes forward. A pinned
+  /// panel is the user's explicit exception and stays.
+  /// This runs on mouse-down. Hiding while the button is held leaves the
+  /// window on screen with its content gone, so the panel defers the hide to
+  /// the release, and the other app is brought forward only after that.
+  private func openTarget(_ target: PreviewOpenTarget) {
+    let shouldClose = PanelClosePolicy.decide(.externalHandoff, context: appState.focusContext) == .close
+    if shouldClose {
+      appState.popup.close()
+    }
+    let handOff = {
+      DispatchQueue.main.async {
+        self.handOff(target)
+      }
+    }
+    if let panel = appState.appDelegate?.panel {
+      panel.afterPointerRelease(handOff)
+    } else {
+      handOff()
+    }
+  }
+
+  private func handOff(_ target: PreviewOpenTarget) {
+    switch target {
+    case .web(let url):
+      _ = NSWorkspace.shared.open(url)
+    case .file(let url, let isDirectory):
+      if isDirectory {
+        _ = NSWorkspace.shared.open(url)
+      } else {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+      }
+    }
   }
 
   private var centersInCanvas: Bool {
