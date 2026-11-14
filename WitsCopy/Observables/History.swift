@@ -306,7 +306,11 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   }
 
   @MainActor
-  func clearAll() {
+  func clearAll(keepingTagged: Bool = false) {
+    if keepingTagged {
+      clearUntagged()
+      return
+    }
     withLogging("Clearing all history") {
       all.forEach { item in
         cleanup(item)
@@ -324,6 +328,31 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     }
     Storage.shared.compactInBackground()
 
+    Clipboard.shared.clear()
+    AppState.shared.popup.close()
+    Task {
+      AppState.shared.popup.needsResize = true
+    }
+  }
+
+  /// Clear All with the storage setting on: tagged rows stay, including pinned ones that have a tag.
+  @MainActor
+  private func clearUntagged() {
+    withLogging("Clearing untagged history") {
+      let removing = all.filter { $0.item.tags.isEmpty }
+      removing.forEach(cleanup)
+      let doomed = Set(removing.map { ObjectIdentifier($0.item) })
+      all.removeAll { $0.item.tags.isEmpty }
+      sessionLog.removeValues { doomed.contains(ObjectIdentifier($0)) }
+      items = all
+      try? Storage.shared.context.transaction {
+        removing.forEach { Storage.shared.context.delete($0.item) }
+      }
+      Storage.shared.context.processPendingChanges()
+      try? Storage.shared.context.save()
+    }
+    updateUnpinnedShortcuts()
+    Storage.shared.compactInBackground()
     Clipboard.shared.clear()
     AppState.shared.popup.close()
     Task {

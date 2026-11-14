@@ -1,4 +1,5 @@
 import AppKit
+import Defaults
 import PDFKit
 import SwiftUI
 
@@ -479,6 +480,8 @@ struct PreviewItemView: View {
   @State private var fileIndex = 0
   @State private var showSystemPreview = false
   @State private var richEditing = false
+  @State private var categoryMenu = false
+  @Default(.workspaceTagDirectory) private var storedTags
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -510,7 +513,7 @@ struct PreviewItemView: View {
           .frame(maxWidth: .infinity, alignment: .leading)
           .accessibilityElement(children: .contain)
           .accessibilityIdentifier("lab-preview-metadata")
-        PreviewCornerActions(item: item)
+        PreviewCornerActions(item: item, onCategoryTap: toggleCategoryMenu)
       }
       .padding(.horizontal, 16)
     }
@@ -519,6 +522,9 @@ struct PreviewItemView: View {
       previewAuxiliary
         .padding(.trailing, 8)
         .padding(.bottom, 8)
+    }
+    .overlayPreferenceValue(PreviewCategoryBadgeAnchor.self) { anchor in
+      categorySelector(anchor: anchor)
     }
     .task(id: "\(item.id.uuidString)#\(item.contentRevision)#\(fileIndex)") {
       showSystemPreview = false
@@ -534,18 +540,74 @@ struct PreviewItemView: View {
       appState.closeOCR()
     }
     .onChange(of: item.id) { _, _ in
+      dismissCategoryMenu()
       session.cancel()
       model.stopMedia()
       showSystemPreview = false
       appState.closeOCR()
     }
+    .onChange(of: item.item.tags.first) { _, _ in
+      dismissCategoryMenu()
+    }
+    .onChange(of: appState.previewAllowed) { _, allowed in
+      if !allowed { dismissCategoryMenu() }
+    }
     .onDisappear {
+      dismissCategoryMenu()
       session.cancel()
       model.stopMedia()
       showSystemPreview = false
       appState.cancelPreviewRecognition = nil
       appState.closeOCR()
     }
+  }
+
+  @ViewBuilder
+  private func categorySelector(anchor: Anchor<CGRect>?) -> some View {
+    if categoryMenu, let anchor, let current = item.item.tags.first {
+      GeometryReader { geometry in
+        let badge = geometry[anchor]
+        let categories = WorkspaceTagDirectory.ordered(stored: storedTags, itemTags: appState.history.knownTags)
+        let frame = PreviewCategorySelectorPlacement.frame(in: geometry.size, badge: badge, categories: categories)
+        ZStack(alignment: .topLeading) {
+          PreviewCategorySelectorInput(listFrame: frame, onDismiss: dismissCategoryMenu)
+            .allowsHitTesting(false)
+          if !frame.isEmpty {
+            PreviewCategoryChoices(categories: categories, current: current) { name in
+              if name.caseInsensitiveCompare(current) != .orderedSame {
+                appState.moveToCategory(item, name: name)
+              }
+              dismissCategoryMenu()
+            }
+            .frame(width: frame.width, height: frame.height)
+            .offset(x: frame.minX, y: frame.minY)
+          }
+        }
+        .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
+        .onChange(of: frame.isEmpty, initial: true) { _, empty in
+          if empty { dismissCategoryMenu() }
+        }
+      }
+      .clipped()
+    }
+  }
+
+  private func toggleCategoryMenu() {
+    if categoryMenu {
+      dismissCategoryMenu()
+    } else {
+      guard !appState.menuTracking else { return }
+      appState.cancelForegroundInputSession()
+      // 复用现有菜单输入生命周期：浏览 Esc / 窗外点击不得同时关闭主面板。
+      appState.menuTracking = true
+      categoryMenu = true
+    }
+  }
+
+  private func dismissCategoryMenu() {
+    guard categoryMenu else { return }
+    categoryMenu = false
+    appState.menuTracking = false
   }
 
   @ViewBuilder
@@ -1044,9 +1106,237 @@ struct PreviewItemView: View {
   }
 }
 
-/// Delete only. Tags are metadata, not an action, so they render as a badge.
+private struct PreviewCategoryBadgeAnchor: PreferenceKey {
+  static let defaultValue: Anchor<CGRect>? = nil
+
+  static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+    value = nextValue() ?? value
+  }
+}
+
+/// 坐标以预览列左上角为原点；底边与胶囊上沿留一道缝，空间不足时只缩短列表。
+enum PreviewCategorySelectorPlacement {
+  static let badgeGap: CGFloat = 4
+  static let rowHeight: CGFloat = 24
+  static let rowSpacing: CGFloat = 2
+  static let contentInset: CGFloat = 4
+
+  static func frame(in size: CGSize, badge: CGRect, categories: [String]) -> CGRect {
+    let edge: CGFloat = 8
+    let availableWidth = max(0, size.width - edge * 2)
+    let bottom = min(badge.minY - badgeGap, size.height - edge)
+    let count = categories.count
+    let contentHeight = CGFloat(count) * rowHeight + CGFloat(max(0, count - 1)) * rowSpacing + contentInset * 2
+    let height = min(240, contentHeight, max(0, bottom - edge))
+    let titleWidth = categories.map {
+      ($0 as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 12)]).width
+    }.max() ?? 0
+    // 为图形、勾选和两侧内边距留位，短名称不再撑成表单宽度。
+    let preferredWidth = min(240, max(120, ceil(titleWidth) + 64, badge.width))
+    let width = min(preferredWidth, availableWidth)
+    guard count > 0, width > 0, height > 0 else { return .zero }
+    let x = min(max(edge, badge.maxX - width), size.width - edge - width)
+    return CGRect(x: x, y: bottom - height, width: width, height: height)
+  }
+}
+
+private struct PreviewCategoryChoices: View {
+  var categories: [String]
+  var current: String
+  var onChoose: (String) -> Void
+
+  var body: some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: PreviewCategorySelectorPlacement.rowSpacing) {
+        ForEach(categories, id: \.self) { name in
+          PreviewCategoryChoiceRow(
+            name: name,
+            current: name.caseInsensitiveCompare(current) == .orderedSame,
+            action: { onChoose(name) }
+          )
+        }
+      }
+    }
+    .padding(PreviewCategorySelectorPlacement.contentInset)
+    .background {
+      if #available(macOS 26.0, *) {
+        GlassEffectView()
+          .allowsHitTesting(false)
+      } else {
+        VisualEffectView()
+          .allowsHitTesting(false)
+      }
+    }
+    .clipShape(RoundedRectangle(cornerRadius: Popup.cornerRadius, style: .continuous))
+    .accessibilityElement(children: .contain)
+    .accessibilityIdentifier("lab-preview-category-selector")
+  }
+}
+
+private struct PreviewCategoryChoiceRow: View {
+  var name: String
+  var current: Bool
+  var action: () -> Void
+
+  var body: some View {
+    HStack(spacing: 6) {
+      WorkspaceTagGlyph(tag: name, size: 12)
+      Text(verbatim: name)
+        .foregroundStyle(Color.primary)
+        .lineLimit(1)
+      Spacer(minLength: 0)
+      if current {
+        Image(systemName: "checkmark")
+          .font(.system(size: 11, weight: .semibold))
+          .foregroundStyle(Color.secondary)
+      }
+    }
+    .font(.system(size: 12))
+    .padding(.horizontal, 8)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .frame(height: PreviewCategorySelectorPlacement.rowHeight)
+    .accessibilityHidden(true)
+    .overlay {
+      PreviewCategoryRowButton(name: name, current: current, action: action)
+        .help(name)
+    }
+  }
+}
+
+/// 复用原生整行点击/悬停，避免 FloatingPanel 的立即按钮路由误点叠层下方的工具。
+private struct PreviewCategoryRowButton: NSViewRepresentable {
+  var name: String
+  var current: Bool
+  var action: () -> Void
+
+  func makeNSView(context: Context) -> ImmediateActionButton {
+    let button = ImmediateActionButton()
+    button.title = ""
+    button.isBordered = false
+    button.setButtonType(.momentaryChange)
+    updateNSView(button, context: context)
+    return button
+  }
+
+  func updateNSView(_ button: ImmediateActionButton, context: Context) {
+    button.onMouseDown = action
+    button.setAccessibilityElement(true)
+    button.setAccessibilityRole(.button)
+    button.setAccessibilityIdentifier("lab-preview-tag-choice")
+    button.setAccessibilityLabel(name)
+    button.setAccessibilityValue(current)
+  }
+
+  func sizeThatFits(
+    _ proposal: ProposedViewSize,
+    nsView: ImmediateActionButton,
+    context: Context
+  ) -> CGSize? {
+    CGSize(width: proposal.width ?? 120, height: proposal.height ?? PreviewCategorySelectorPlacement.rowHeight)
+  }
+}
+
+/// 仅在列表展开时挂载。非命中视图只承载列坐标和临时事件路由，列表仍由 SwiftUI 命中。
+private struct PreviewCategorySelectorInput: NSViewRepresentable {
+  var listFrame: CGRect
+  var onDismiss: () -> Void
+
+  func makeNSView(context: Context) -> PreviewCategorySelectorInputView {
+    let view = PreviewCategorySelectorInputView()
+    view.listFrame = listFrame
+    view.onDismiss = onDismiss
+    return view
+  }
+
+  func updateNSView(_ view: PreviewCategorySelectorInputView, context: Context) {
+    view.listFrame = listFrame
+    view.onDismiss = onDismiss
+  }
+
+  static func dismantleNSView(_ view: PreviewCategorySelectorInputView, coordinator: ()) {
+    view.stop()
+  }
+}
+
+private final class PreviewCategorySelectorInputView: NSView {
+  var listFrame = CGRect.zero
+  var onDismiss: (() -> Void)?
+  private var localMonitor: Any?
+  private var outsideMonitor: Any?
+  private var dismissing = false
+  private weak var borrowedKeyWindow: NSWindow?
+
+  override var isFlipped: Bool { true }
+  override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+  override func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    guard let window else {
+      stop()
+      return
+    }
+    guard localMonitor == nil else { return }
+    dismissing = false
+    let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]
+    localMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+      MainActor.assumeIsolated {
+        guard let self else { return event }
+        return self.route(event)
+      }
+    }
+    outsideMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
+      MainActor.assumeIsolated {
+        if event.type != .keyDown || event.keyCode == 53 { self?.dismissAfterEvent() }
+      }
+    }
+    // 显式点胶囊才借用现有本窗 key 许可；不换 firstResponder，因此不会保存正文草稿。
+    if !window.canBecomeKey, let localWindow = window as? LocalRecordingKeyWindow {
+      borrowedKeyWindow = window
+      localWindow.requestLocalRecordingKey()
+    }
+    window.makeKey()
+  }
+
+  func stop() {
+    if let localMonitor { NSEvent.removeMonitor(localMonitor) }
+    if let outsideMonitor { NSEvent.removeMonitor(outsideMonitor) }
+    localMonitor = nil
+    outsideMonitor = nil
+    (borrowedKeyWindow as? LocalRecordingKeyWindow)?.releaseLocalRecordingKey()
+    borrowedKeyWindow = nil
+  }
+
+  private func route(_ event: NSEvent) -> NSEvent? {
+    guard let window else { return event }
+    if event.type == .keyDown {
+      guard event.window == nil || event.window === window else { return event }
+      if event.keyCode == 53 { dismissAfterEvent() }
+      // Return / ⌘Return 等不能漏给正文保存、列表粘贴或主窗快捷键。
+      return nil
+    }
+    if !dismissing, event.window === window,
+       listFrame.contains(convert(event.locationInWindow, from: nil)) {
+      return event
+    }
+    dismissAfterEvent()
+    return nil
+  }
+
+  private func dismissAfterEvent() {
+    guard !dismissing else { return }
+    dismissing = true
+    // 保持 menuTracking 到本次事件分发结束，避免已有浏览监视器把同一次 Esc / 窗外点击关窗。
+    DispatchQueue.main.async { [weak self] in
+      guard let self, self.localMonitor != nil else { return }
+      self.onDismiss?()
+    }
+  }
+}
+
+/// Delete, plus the category chip. The chip opens an in-window list; it does not edit the name.
 struct PreviewCornerActions: View {
   var item: HistoryItemDecorator
+  var onCategoryTap: () -> Void = {}
   @Environment(AppState.self) private var appState
 
   var body: some View {
@@ -1061,18 +1351,22 @@ struct PreviewCornerActions: View {
       )
     }
     .fixedSize()
-    // 不垫底色：标签胶囊和垃圾桶与预览里其他图标一样直接落在面板上。
     .accessibilityElement(children: .contain)
   }
 
-  /// 标签是元数据：这里只展示，不做编辑。
-  /// 行菜单和预览工具栏已经能改标签，这里再放一个入口只会让人以为有两套。
-  /// 与侧栏和列表共用同一个标签外观。
   @ViewBuilder
   private var tagBadge: some View {
     if let category = item.item.tags.first {
-      WorkspaceTagBadge(tag: category)
-        .accessibilityIdentifier("lab-preview-tag-badge")
+      Button(action: onCategoryTap) {
+        WorkspaceTagBadge(tag: category)
+      }
+      .buttonStyle(.plain)
+      .accessibilityIdentifier("lab-preview-tag-badge")
+      .accessibilityLabel(Text(verbatim: category))
+      .help(NSLocalizedString("tag_switch_help", comment: ""))
+      .anchorPreference(key: PreviewCategoryBadgeAnchor.self, value: .bounds) { anchor in
+        anchor
+      }
     }
   }
 

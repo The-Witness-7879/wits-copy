@@ -11,6 +11,9 @@
 "FirstCopiedAt" = "首次复制时间";
 "NumberOfCopies" = "复制次数";
 "SortByTooltip" = "默认：上次复制时间。";
+"ClearAll" = "全部清除：";
+"ClearAllKeepsTagged" = "保留带标签的内容";
+"ClearAllKeepsTaggedHelp" = "每次全部清除仍会确认。打开后，带标签的内容不会被清除。";
 "SaveFilesHelp" = "记录复制的文件（不含视频）。只保存路径，不备份文件。";
 "SaveImagesHelp" = "记录复制的图片。";
 "SaveTextHelp" = "记录复制的文本。";

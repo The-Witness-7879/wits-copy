@@ -91,6 +91,8 @@ extension Defaults.Keys {
   static let size = Key<Int>("historySize", default: 200, suite: preferencesSuite)
   static let sortBy = Key<Sorter.By>("sortBy", default: .lastCopiedAt, suite: preferencesSuite)
   static let suppressClearAlert = Key<Bool>("suppressClearAlert", default: false, suite: preferencesSuite)
+  /// Clear All leaves items that already have a tag. Off deletes those too, after confirmation.
+  static let clearAllKeepsTagged = Key<Bool>("clearAllKeepsTagged", default: true, suite: preferencesSuite)
   static let suppressQuitAlert = Key<Bool>("suppressQuitAlert", default: false, suite: preferencesSuite)
   static let windowSize = Key<NSSize>("windowSize", default: NSSize(width: PanelSplit.defaultList, height: PanelSplit.defaultHeight), suite: preferencesSuite)
   static let windowPosition = Key<NSPoint>("windowPosition", default: NSPoint(x: 0.5, y: 0.8), suite: preferencesSuite)

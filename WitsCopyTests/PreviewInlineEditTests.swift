@@ -3,6 +3,55 @@ import SwiftUI
 import XCTest
 @testable import WitsCopy
 
+/// 只检验预览列内的布局约束，不创建窗口或访问存储。
+final class PreviewCategorySelectorPlacementTests: XCTestCase {
+  func testShortListAttachesToTheBadgeTopWithoutMovingTheFooter() {
+    let frame = PreviewCategorySelectorPlacement.frame(
+      in: CGSize(width: 300, height: 260),
+      badge: CGRect(x: 220, y: 230, width: 50, height: 20),
+      categories: ["addr", "net", "邮箱"]
+    )
+    XCTAssertEqual(frame.height, 84)
+    XCTAssertEqual(frame.maxY, 226, "菜单与胶囊上沿保持 4pt 空隙")
+    XCTAssertEqual(frame.maxX, 270)
+    XCTAssertLessThan(frame.width, 200, "短分类名不应撑成表单宽度")
+    let longer = PreviewCategorySelectorPlacement.frame(
+      in: CGSize(width: 300, height: 260),
+      badge: CGRect(x: 220, y: 230, width: 50, height: 20),
+      categories: ["这是一个需要更宽显示空间的分类名称"]
+    )
+    XCTAssertGreaterThan(longer.width, frame.width)
+    XCTAssertLessThanOrEqual(longer.width, 240)
+  }
+
+  func testManyCategoriesStayInsideNarrowAndShortColumns() {
+    let categories = Array(repeating: "分类", count: 30)
+    let narrow = PreviewCategorySelectorPlacement.frame(
+      in: CGSize(width: 120, height: 100),
+      badge: CGRect(x: 60, y: 40, width: 42, height: 18),
+      categories: categories
+    )
+    XCTAssertEqual(narrow, CGRect(x: 8, y: 8, width: 104, height: 28))
+    let tall = PreviewCategorySelectorPlacement.frame(
+      in: CGSize(width: 460, height: 520),
+      badge: CGRect(x: 320, y: 480, width: 90, height: 20),
+      categories: categories
+    )
+    XCTAssertEqual(tall.height, 240)
+    XCTAssertEqual(tall.maxY, 476)
+    XCTAssertEqual(tall.maxX, 410)
+    XCTAssertEqual(
+      PreviewCategorySelectorPlacement.frame(
+        in: CGSize(width: 120, height: 100),
+        badge: CGRect(x: 60, y: 4, width: 42, height: 18),
+        categories: categories
+      ),
+      .zero,
+      "没有上拉空间时不能翻向胶囊下方"
+    )
+  }
+}
+
 /// Synthetic Chinese/English/emoji decode and in-place edit keys.
 /// Does not order a window, activate the app, read user history, or touch the system pasteboard.
 @MainActor

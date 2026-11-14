@@ -38,11 +38,10 @@ class Footer: ItemsContainer {
           confirmHelp: "clear_alert_confirm_help",
           cancelHelp: "clear_alert_cancel_help",
           suppressHelp: "clear_alert_suppress_help"
-        ),
-        suppressConfirmation: suppressClearAlert
+        )
       ) {
         Task { @MainActor in
-          AppState.shared.history.clearAll()
+          AppState.shared.history.clearAll(keepingTagged: Defaults[.clearAllKeepsTagged])
         }
       },
       FooterItem(

@@ -11,6 +11,9 @@
 "FirstCopiedAt" = "Time of first copy";
 "NumberOfCopies" = "Number of copies";
 "SortByTooltip" = "Default: Time of last copy.";
+"ClearAll" = "Clear all:";
+"ClearAllKeepsTagged" = "Keep tagged items";
+"ClearAllKeepsTaggedHelp" = "Clear All still asks every time. Tagged items stay when this is on.";
 "SaveFilesHelp" = "Record copied files, except videos. Only the path is kept; the file is not backed up.";
 "SaveImagesHelp" = "Record copied images.";
 "SaveTextHelp" = "Record copied text.";

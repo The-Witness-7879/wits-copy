@@ -1619,7 +1619,7 @@ final class FooterConfirmationContractTests: XCTestCase {
           clear !== quit,
           clear.confirmation?.messageKey == "clear_all_alert_message",
           quit.confirmation?.messageKey == "quit_alert_message",
-          let clearBinding = clear.suppressConfirmation,
+          clear.suppressConfirmation == nil,
           let quitBinding = quit.suppressConfirmation,
           let liveClear = AppState.shared.footer.items.first(where: { $0.title == "clear_all" }),
           let liveQuit = AppState.shared.footer.items.first(where: { $0.title == "quit" }),
@@ -1648,16 +1648,12 @@ final class FooterConfirmationContractTests: XCTestCase {
     removeThreeKeys()
     assertThreeKeys(clear: nil, quit: nil, delete: nil, clearItem: clear, quitItem: quit, label: "baseline")
 
-    clearBinding.wrappedValue = true
-    XCTAssertTrue(Defaults[.suppressClearAlert])
-    XCTAssertEqual(liveClear.suppressConfirmation?.wrappedValue, true)
+    Defaults[.suppressClearAlert] = true
     XCTAssertEqual(liveQuit.suppressConfirmation?.wrappedValue, false)
-    assertThreeKeys(clear: true, quit: nil, delete: nil, clearItem: clear, quitItem: quit, label: "factory-clear-write")
+    assertThreeKeys(clear: true, quit: nil, delete: nil, clearItem: clear, quitItem: quit, label: "stale-clear-key-does-not-bind")
 
     Defaults[.suppressQuitAlert] = true
     XCTAssertEqual(quitBinding.wrappedValue, true)
-    XCTAssertEqual(clearBinding.wrappedValue, true)
-    XCTAssertEqual(liveQuit.suppressConfirmation?.wrappedValue, true)
     assertThreeKeys(clear: true, quit: true, delete: nil, clearItem: clear, quitItem: quit, label: "defaults-quit-write")
 
     removeThreeKeys()
@@ -1666,34 +1662,34 @@ final class FooterConfirmationContractTests: XCTestCase {
     guard presentFactory(clear, response: .alertSecondButtonReturn, suppress: true, label: "clear-cancel-suppress") else { return }
     XCTAssertEqual(clearRuns, 0)
     XCTAssertEqual(quitRuns, 0)
-    assertThreeKeys(clear: true, quit: nil, delete: nil, clearItem: clear, quitItem: quit, label: "clear-cancel-wrote-only-clear")
+    assertThreeKeys(clear: nil, quit: nil, delete: nil, clearItem: clear, quitItem: quit, label: "clear-cancel-wrote-nothing")
 
-    guard expectSuppressedFooterSkipsAlert(clear, label: "clear-true-skips-own-alert") else { return }
-    XCTAssertEqual(clearRuns, 1)
+    guard presentFactory(clear, response: .alertSecondButtonReturn, suppress: true, label: "clear-still-prompts-when-old-key-is-true") else { return }
+    XCTAssertEqual(clearRuns, 0)
     XCTAssertEqual(quitRuns, 0)
     guard presentFactory(quit, response: .alertSecondButtonReturn, suppress: false, label: "quit-still-prompts-while-clear-true") else { return }
     XCTAssertEqual(quitRuns, 0)
-    XCTAssertEqual(clearRuns, 1)
-    assertThreeKeys(clear: true, quit: nil, delete: nil, clearItem: clear, quitItem: quit, label: "quit-cancel-wrote-nothing")
+    XCTAssertEqual(clearRuns, 0)
+    assertThreeKeys(clear: nil, quit: nil, delete: nil, clearItem: clear, quitItem: quit, label: "quit-cancel-wrote-nothing")
     guard let keptWhileClear = addSynthetic("footer-factory-clear-cross") else { return }
     guard promptDelete(keptWhileClear, response: .alertSecondButtonReturn, suppress: false, label: "delete-still-prompts-while-clear-true") else { return }
     XCTAssertFalse(keptWhileClear.isRemoved)
     XCTAssertTrue(History.shared.all.contains(keptWhileClear))
-    assertThreeKeys(clear: true, quit: nil, delete: nil, clearItem: clear, quitItem: quit, label: "delete-cancel-wrote-nothing")
+    assertThreeKeys(clear: nil, quit: nil, delete: nil, clearItem: clear, quitItem: quit, label: "delete-cancel-wrote-nothing")
 
-    clearBinding.wrappedValue = false
+    Defaults[.suppressClearAlert] = false
     absent(Defaults.Keys.suppressQuitAlert)
     XCTAssertEqual(quitBinding.wrappedValue, false)
     assertThreeKeys(clear: false, quit: nil, delete: nil, clearItem: clear, quitItem: quit, label: "before-quit-confirm")
     guard presentFactory(quit, response: .alertFirstButtonReturn, suppress: true, label: "quit-confirm-suppress") else { return }
     XCTAssertEqual(quitRuns, 1)
-    XCTAssertEqual(clearRuns, 1)
+    XCTAssertEqual(clearRuns, 0)
     assertThreeKeys(clear: false, quit: true, delete: nil, clearItem: clear, quitItem: quit, label: "quit-confirm-wrote-only-quit")
     guard expectSuppressedFooterSkipsAlert(quit, label: "quit-true-skips-own-alert") else { return }
     XCTAssertEqual(quitRuns, 2)
-    XCTAssertEqual(clearRuns, 1)
+    XCTAssertEqual(clearRuns, 0)
     guard presentFactory(clear, response: .alertSecondButtonReturn, suppress: false, label: "clear-still-prompts-while-quit-true") else { return }
-    XCTAssertEqual(clearRuns, 1)
+    XCTAssertEqual(clearRuns, 0)
     assertThreeKeys(clear: false, quit: true, delete: nil, clearItem: clear, quitItem: quit, label: "clear-cancel-while-quit-true")
     guard let keptWhileQuit = addSynthetic("footer-factory-quit-cross") else { return }
     guard promptDelete(keptWhileQuit, response: .alertSecondButtonReturn, suppress: false, label: "delete-still-prompts-while-quit-true") else { return }
@@ -1714,7 +1710,7 @@ final class FooterConfirmationContractTests: XCTestCase {
     assertThreeKeys(clear: false, quit: true, delete: true, clearItem: clear, quitItem: quit, label: "delete-cancel-wrote-only-delete")
 
     guard presentFactory(clear, response: .alertSecondButtonReturn, suppress: false, label: "clear-still-prompts-while-delete-true") else { return }
-    XCTAssertEqual(clearRuns, 1)
+    XCTAssertEqual(clearRuns, 0)
     assertThreeKeys(clear: false, quit: true, delete: true, clearItem: clear, quitItem: quit, label: "clear-unchanged-while-delete-true")
     quitBinding.wrappedValue = false
     assertThreeKeys(clear: false, quit: false, delete: true, clearItem: clear, quitItem: quit, label: "quit-cleared-delete-remains")
@@ -1724,14 +1720,13 @@ final class FooterConfirmationContractTests: XCTestCase {
 
     guard let direct = addSynthetic("footer-factory-delete-direct") else { return }
     guard expectSuppressedDeleteSkipsAlert(direct, label: "delete-true-skips-own-alert") else { return }
-    XCTAssertEqual(clearRuns, 1)
+    XCTAssertEqual(clearRuns, 0)
     XCTAssertEqual(quitRuns, 2)
     assertThreeKeys(clear: false, quit: false, delete: true, clearItem: clear, quitItem: quit, label: "delete-skip-wrote-nothing-else")
 
     absent(Defaults.Keys.suppressClearAlert)
-    XCTAssertFalse(clearBinding.wrappedValue)
     guard presentFactory(clear, response: .alertFirstButtonReturn, suppress: false, label: "clear-confirm-no-suppress") else { return }
-    XCTAssertEqual(clearRuns, 2)
+    XCTAssertEqual(clearRuns, 1)
     XCTAssertEqual(quitRuns, 2)
     assertThreeKeys(clear: nil, quit: false, delete: true, clearItem: clear, quitItem: quit, label: "clear-confirm-wrote-nothing")
 
@@ -1992,16 +1987,14 @@ final class FooterConfirmationContractTests: XCTestCase {
     XCTAssertEqual(persistedFlag(clearName, suite: LabDefaults.suite), clear, label, file: file, line: line)
     XCTAssertEqual(persistedFlag(quitName, suite: LabDefaults.suite), quit, label, file: file, line: line)
     XCTAssertEqual(persistedFlag(deleteName, suite: LabDefaults.suite), delete, label, file: file, line: line)
-    XCTAssertNotNil(clearItem.suppressConfirmation, label, file: file, line: line)
+    XCTAssertNil(clearItem.suppressConfirmation, label, file: file, line: line)
     XCTAssertNotNil(quitItem.suppressConfirmation, label, file: file, line: line)
-    XCTAssertEqual(clearItem.suppressConfirmation?.wrappedValue ?? false, clear ?? false, label, file: file, line: line)
     XCTAssertEqual(quitItem.suppressConfirmation?.wrappedValue ?? false, quit ?? false, label, file: file, line: line)
     XCTAssertEqual(DeleteItemConfirmationStore.isSuppressed, delete == true, label, file: file, line: line)
     let liveClearBinding = AppState.shared.footer.items.first { $0.title == "clear_all" }?.suppressConfirmation
     let liveQuitBinding = AppState.shared.footer.items.first { $0.title == "quit" }?.suppressConfirmation
-    XCTAssertNotNil(liveClearBinding, label, file: file, line: line)
+    XCTAssertNil(liveClearBinding, label, file: file, line: line)
     XCTAssertNotNil(liveQuitBinding, label, file: file, line: line)
-    XCTAssertEqual(liveClearBinding?.wrappedValue ?? false, clear ?? false, label, file: file, line: line)
     XCTAssertEqual(liveQuitBinding?.wrappedValue ?? false, quit ?? false, label, file: file, line: line)
     assertStandardUntouched(file: file, line: line)
   }
@@ -2137,20 +2130,24 @@ final class FooterConfirmationContractTests: XCTestCase {
       XCTAssertEqual(alert.buttons.dropFirst().first?.toolTip, NSLocalizedString(item.confirmation!.cancelHelpKey, comment: ""))
       XCTAssertFalse(alert.buttons.first?.toolTip?.isEmpty ?? true)
       XCTAssertFalse(alert.buttons.dropFirst().first?.toolTip?.isEmpty ?? true)
-      XCTAssertTrue(alert.showsSuppressionButton)
-      XCTAssertNotNil(alert.suppressionButton, "clear/quit suppression button was not installed")
-      XCTAssertFalse(alert.suppressionButton?.toolTip?.isEmpty ?? true)
-      XCTAssertEqual(
-        alert.suppressionButton?.toolTip,
-        NSLocalizedString(item.confirmation!.suppressHelpKey, comment: ""),
-        "suppression tooltip is not bound to \(item.confirmation!.suppressHelpKey)"
-      )
+      if item.suppressConfirmation == nil {
+        XCTAssertFalse(alert.showsSuppressionButton, "clear all must not offer a skip")
+      } else {
+        XCTAssertTrue(alert.showsSuppressionButton)
+        XCTAssertNotNil(alert.suppressionButton, "quit suppression button was not installed")
+        XCTAssertFalse(alert.suppressionButton?.toolTip?.isEmpty ?? true)
+        XCTAssertEqual(
+          alert.suppressionButton?.toolTip,
+          NSLocalizedString(item.confirmation!.suppressHelpKey, comment: ""),
+          "suppression tooltip is not bound to \(item.confirmation!.suppressHelpKey)"
+        )
+        alert.suppressionButton?.state = suppress ? .on : .off
+      }
       XCTAssertNotEqual(
         NSLocalizedString("clear_alert_suppress_help", comment: ""),
         NSLocalizedString("quit_alert_suppress_help", comment: ""),
         "clear and quit suppression help must stay distinct"
       )
-      alert.suppressionButton?.state = suppress ? .on : .off
       let calls = DeleteAlertProbe.runModalCount + DeleteAlertProbe.sheetCount
       AppState.shared.presentFooterConfirmation(item)
       XCTAssertEqual(DeleteAlertProbe.runModalCount + DeleteAlertProbe.sheetCount, calls, "reentry must not present a second alert")

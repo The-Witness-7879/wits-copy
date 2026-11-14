@@ -1031,7 +1031,10 @@ class AppState: Sendable {
     item.showConfirmation = true
     let alert = NSAlert()
     alert.messageText = NSLocalizedString(confirmation.messageKey, comment: "")
-    alert.informativeText = NSLocalizedString(confirmation.commentKey, comment: "")
+    let commentKey = item.title == "clear_all" && Defaults[.clearAllKeepsTagged]
+      ? "clear_all_alert_comment_keep_tagged"
+      : confirmation.commentKey
+    alert.informativeText = NSLocalizedString(commentKey, comment: "")
     alert.alertStyle = .warning
     let confirmButton = alert.addButton(withTitle: NSLocalizedString(confirmation.confirmKey, comment: ""))
     confirmButton.toolTip = NSLocalizedString(confirmation.confirmHelpKey, comment: "")

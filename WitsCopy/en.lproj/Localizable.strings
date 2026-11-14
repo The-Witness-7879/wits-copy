@@ -75,6 +75,7 @@
 "about_summary" = "A clipboard history that lives in the menu bar. Text, images, and files you copy are kept automatically — search, pin, and tag them, and preview before you paste. History is stored only on this Mac and is never uploaded by the app.";
 "clear_all_alert_message" = "Clear every item?";
 "clear_all_alert_comment" = "Pinned and tagged items are deleted too. This cannot be undone.";
+"clear_all_alert_comment_keep_tagged" = "Tagged items are kept. Everything else is deleted. This cannot be undone.";
 "quit_alert_message" = "Are you sure you want to quit?";
 "quit_alert_comment" = "Copies are no longer recorded until you open the app again.";
 "pin_shortcut_retry" = "Press\n⌘+letter";
@@ -123,6 +124,7 @@
 "tag_drop_ghost" = "Item";
 "tag_rename_help" = "Rename";
 "tag_merge_help" = "Merge";
+"tag_switch_help" = "Switch category";
 "snippet_add_help" = "Add snippet";
 "clear_alert_confirm_help" = "Clear";
 "clear_alert_cancel_help" = "Cancel";

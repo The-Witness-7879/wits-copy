@@ -57,6 +57,7 @@ struct StorageSettingsPane: View {
 
   @Default(.size) private var size
   @Default(.sortBy) private var sortBy
+  @Default(.clearAllKeepsTagged) private var keepsTagged
   @Default(.saveVideos) private var saveVideos
   @Default(.saveAudio) private var saveAudio
 
@@ -126,6 +127,14 @@ struct StorageSettingsPane: View {
         }
         .settingsPickerWidth()
         .iconHelp(NSLocalizedString("SortByTooltip", tableName: "StorageSettings", comment: ""))
+      }
+
+      SettingsLayout.row("ClearAll", table: "StorageSettings") {
+        Toggle(isOn: $keepsTagged) {
+          Text("ClearAllKeepsTagged", tableName: "StorageSettings")
+        }
+        .iconHelp(NSLocalizedString("ClearAllKeepsTaggedHelp", tableName: "StorageSettings", comment: ""))
+        .accessibilityIdentifier("lab-clear-all-keeps-tagged")
       }
 
       SettingsLayout.sectionBreak()

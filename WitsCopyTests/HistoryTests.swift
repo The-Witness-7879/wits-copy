@@ -594,6 +594,23 @@ class HistoryTests: XCTestCase {
     XCTAssertEqual(storedContentCount(), 0)
   }
 
+  func testClearAllKeepsTaggedItemsUntilTheSettingIsOff() {
+    let tagged = history.add(historyItem("kept"))
+    tagged.item.tags = ["邮箱"]
+    history.add(historyItem("gone"))
+    let saved = Defaults[.clearAllKeepsTagged]
+    defer { Defaults[.clearAllKeepsTagged] = saved }
+    Defaults[.clearAllKeepsTagged] = true
+    history.clearAll(keepingTagged: Defaults[.clearAllKeepsTagged])
+    XCTAssertEqual(history.all.map(\.text), ["kept"])
+    XCTAssertEqual(history.all.first?.item.tags, ["邮箱"])
+    XCTAssertEqual(storedContentCount(), 1)
+    Defaults[.clearAllKeepsTagged] = false
+    history.clearAll(keepingTagged: Defaults[.clearAllKeepsTagged])
+    XCTAssertTrue(history.all.isEmpty)
+    XCTAssertEqual(storedContentCount(), 0)
+  }
+
   func testPurgeRemovesOnlyOrphanedContents() throws {
     history.add(historyItem("kept"))
     let orphan = HistoryItemContent(type: "public.tiff", value: Data(repeating: 1, count: 1024))
