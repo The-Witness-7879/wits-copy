@@ -108,7 +108,7 @@ final class SettingsLayoutTests: XCTestCase {
   func testSparkleWindowsAndAboutPanelWearTheGlassShell() throws {
     let root = settingsRoot.deletingLastPathComponent()
     let updater = try String(contentsOf: root.appendingPathComponent("SoftwareUpdater.swift"))
-    XCTAssertTrue(updater.contains("userDriverDelegate: windowGlass"), "Sparkle's driver reports to the glass adopter")
+    XCTAssertTrue(updater.contains("SPUStandardUserDriver(hostBundle: hostBundle, delegate: glass)"), "Sparkle's driver reports to the glass adopter")
     XCTAssertTrue(updater.contains("GlassShell.adopt(window)"))
     let about = try String(contentsOf: root.appendingPathComponent("About.swift"))
     XCTAssertTrue(about.contains("GlassShell.adopt(panel)"))

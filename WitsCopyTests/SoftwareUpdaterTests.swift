@@ -88,5 +88,61 @@ final class SoftwareUpdaterTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(strings[key]).isEmpty, "\(language): \(key)")
       }
     }
+    for language in ["en", "zh-Hans"] {
+      let url = try XCTUnwrap(Bundle.main.url(forResource: "Localizable", withExtension: "strings",
+        subdirectory: nil, localization: language))
+      let strings = try XCTUnwrap(try PropertyListSerialization.propertyList(
+        from: Data(contentsOf: url), format: nil) as? [String: String])
+      for key in ["rail_update_download", "rail_update_download_help", "rail_update_busy",
+                   "rail_update_busy_help", "rail_update_restart", "rail_update_restart_help"] {
+        XCTAssertFalse(try XCTUnwrap(strings[key]).isEmpty, "\(language): \(key)")
+      }
+    }
+  }
+
+  func testScheduledInstallableUpdateUsesTheSidebarAndConsumesEachReplyOnce() {
+    XCTAssertTrue(SoftwareUpdater.offersInlineDownload(userInitiated: false, informationOnly: false, majorUpgrade: false))
+    XCTAssertFalse(SoftwareUpdater.offersInlineDownload(userInitiated: true, informationOnly: false, majorUpgrade: false))
+    XCTAssertFalse(SoftwareUpdater.offersInlineDownload(userInitiated: false, informationOnly: true, majorUpgrade: false))
+    XCTAssertFalse(SoftwareUpdater.offersInlineDownload(userInitiated: false, informationOnly: false, majorUpgrade: true))
+
+    let updater = SoftwareUpdater()
+    XCTAssertNil(updater.railOffer)
+    var choices: [SPUUserUpdateChoice] = []
+    updater.presentInstallable(version: "9.9.9") { choices.append($0) }
+    XCTAssertEqual(updater.railOffer, RailUpdateOffer(version: "9.9.9", phase: .available, preview: false))
+    updater.acceptRailUpdate()
+    updater.acceptRailUpdate()
+    XCTAssertEqual(choices, [.install])
+    XCTAssertEqual(updater.railOffer?.phase, .downloading)
+
+    updater.presentReady { choices.append($0) }
+    XCTAssertEqual(updater.railOffer?.phase, .ready)
+    updater.acceptRailUpdate()
+    updater.acceptRailUpdate()
+    XCTAssertEqual(choices, [.install, .install])
+    updater.clearRailSession()
+    XCTAssertNil(updater.railOffer)
+    updater.acceptRailUpdate()
+    XCTAssertEqual(choices, [.install, .install])
+  }
+
+  func testANewOfferDismissesThePreviousReplyAndPreviewCannotInstall() {
+    let updater = SoftwareUpdater()
+    var first: [SPUUserUpdateChoice] = []
+    var second: [SPUUserUpdateChoice] = []
+    updater.presentInstallable(version: "1") { first.append($0) }
+    updater.presentInstallable(version: "2") { second.append($0) }
+    XCTAssertEqual(first, [.dismiss])
+    updater.clearRailSession()
+    XCTAssertEqual(second, [.dismiss])
+
+    updater.presentPreview(version: "preview")
+    updater.acceptRailUpdate()
+    XCTAssertEqual(updater.railOffer?.phase, .downloading)
+    updater.acceptRailUpdate()
+    XCTAssertEqual(updater.railOffer?.phase, .ready)
+    updater.acceptRailUpdate()
+    XCTAssertEqual(updater.railOffer?.phase, .ready)
   }
 }

@@ -91,8 +91,13 @@ struct WorkspaceManagementRail: View {
           scrollTag = nil
         }
       }
-      // 设置固定在左栏底部，不随标签滚动；底边与条目列的底部留白一致。
-      settingsRow(expanded: expanded)
+      // 设置固定在左栏底部，不随标签滚动；有更新时按钮出现在它上方。
+      VStack(alignment: .leading, spacing: WorkspaceRailFlow.spacing) {
+        if appState.softwareUpdater.railOffer != nil {
+          updateRow(expanded: expanded)
+        }
+        settingsRow(expanded: expanded)
+      }
         .padding(.leading, WorkspaceRailMetrics.railLeading)
         .padding(.trailing, WorkspaceRailMetrics.railTrailing)
         .padding(.top, WorkspaceRailFlow.spacing)
@@ -218,6 +223,45 @@ struct WorkspaceManagementRail: View {
         directoryError = error.message
       }
     }
+  }
+
+  private func updateRow(expanded: Bool) -> some View {
+    let phase = appState.softwareUpdater.railOffer?.phase
+    let titleKey: String
+    let helpKey: String
+    let symbol: String
+    switch phase {
+    case .ready:
+      titleKey = "rail_update_restart"
+      helpKey = "rail_update_restart_help"
+      symbol = "arrow.clockwise"
+    case .downloading:
+      titleKey = "rail_update_busy"
+      helpKey = "rail_update_busy_help"
+      symbol = "arrow.down.circle"
+    default:
+      titleKey = "rail_update_download"
+      helpKey = "rail_update_download_help"
+      symbol = "arrow.down.circle"
+    }
+    let title = NSLocalizedString(titleKey, comment: "")
+    let help = NSLocalizedString(helpKey, comment: "")
+    return WorkspaceRailRow(
+      systemName: symbol,
+      title: title,
+      expanded: expanded,
+      selected: false,
+      help: help,
+      identifier: "lab-rail-update",
+      onTap: {
+        guard phase != .downloading else { return }
+        appState.softwareUpdater.acceptRailUpdate()
+      }
+    )
+    .iconHelp(help)
+    .accessibilityIdentifier("lab-rail-update")
+    .accessibilityLabel(Text(title))
+    .opacity(phase == .downloading ? 0.72 : 1)
   }
 
   private func settingsRow(expanded: Bool) -> some View {

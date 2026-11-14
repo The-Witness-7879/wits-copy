@@ -11,6 +11,12 @@
 "preferences" = "设置…";
 "rail_settings" = "设置";
 "rail_settings_help" = "打开设置（⌘,）";
+"rail_update_download" = "下载更新";
+"rail_update_download_help" = "下载已发现的新版本";
+"rail_update_busy" = "正在下载";
+"rail_update_busy_help" = "正在下载并验证更新";
+"rail_update_restart" = "重启并更新";
+"rail_update_restart_help" = "退出并安装已准备好的更新";
 "clear_alert_cancel" = "取消";
 "clear_alert_confirm" = "清除";
 "tag_placeholder" = "标签";

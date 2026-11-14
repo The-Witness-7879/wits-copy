@@ -2,76 +2,320 @@ import AppKit
 import Observation
 import Sparkle
 
-/// One controller for the process. Sparkle owns the persisted preferences and scheduler.
+enum RailUpdatePhase: Equatable {
+  case available
+  case downloading
+  case ready
+}
+
+struct RailUpdateOffer: Equatable {
+  var version: String
+  var phase: RailUpdatePhase
+  var preview: Bool
+}
+
+/// One updater for the process. Sparkle still owns scheduling, verification, and installation.
 @MainActor
 @Observable
 final class SoftwareUpdater {
   nonisolated static let feedURL = "https://github.com/The-Witness-7879/wits-copy/releases/latest/download/appcast.xml"
+  nonisolated static let previewArgument = "--lab-update-preview"
 
   private(set) var automaticallyChecksForUpdates = true
   private(set) var canCheckForUpdates = false
   private(set) var isStarted = false
+  private(set) var railOffer: RailUpdateOffer?
 
-  @ObservationIgnored private var controller: SPUStandardUpdaterController?
+  var canOpenUpdate: Bool { canCheckForUpdates || railOffer != nil }
+
+  @ObservationIgnored private var sparkle: SPUUpdater?
+  @ObservationIgnored private var driver: RailUpdateDriver?
   @ObservationIgnored private var automaticChecksObservation: NSKeyValueObservation?
   @ObservationIgnored private var availabilityObservation: NSKeyValueObservation?
   @ObservationIgnored private let feedDelegate = WitsCopyUpdateFeedDelegate()
   @ObservationIgnored private let windowGlass = UpdateWindowGlass()
+  @ObservationIgnored private var installReply: ((SPUUserUpdateChoice) -> Void)?
+  @ObservationIgnored private var readyReply: ((SPUUserUpdateChoice) -> Void)?
 
   init() {
     // Never construct Sparkle in XCTest, previews, smoke/QA hosts, or another app's bundle.
-    // In particular, a unit-test host must not schedule networking or touch production SU defaults.
-    guard !LabRuntime.isIsolated, Bundle.main.bundleIdentifier == LabRuntime.bundleIdentifier else { return }
+    guard !LabRuntime.isIsolated, Bundle.main.bundleIdentifier == LabRuntime.bundleIdentifier else {
+      if Self.smokePreviewRequested {
+        railOffer = RailUpdateOffer(version: "0.2.4", phase: .available, preview: true)
+      }
+      return
+    }
 
-    let controller = SPUStandardUpdaterController(
-      startingUpdater: false,
-      updaterDelegate: feedDelegate,
-      userDriverDelegate: windowGlass
+    let driver = RailUpdateDriver(hostBundle: Bundle.main, glass: windowGlass)
+    driver.owner = self
+    let updater = SPUUpdater(
+      hostBundle: Bundle.main,
+      applicationBundle: Bundle.main,
+      userDriver: driver,
+      delegate: feedDelegate
     )
-    self.controller = controller
-    automaticChecksObservation = controller.updater.observe(
+    self.driver = driver
+    self.sparkle = updater
+    automaticChecksObservation = updater.observe(
       \.automaticallyChecksForUpdates, options: [.initial, .new]
     ) { [weak self] updater, _ in
       MainActor.assumeIsolated {
         self?.automaticallyChecksForUpdates = updater.automaticallyChecksForUpdates
       }
     }
-    availabilityObservation = controller.updater.observe(
+    availabilityObservation = updater.observe(
       \.canCheckForUpdates, options: [.initial, .new]
     ) { [weak self] updater, _ in
       MainActor.assumeIsolated {
         self?.canCheckForUpdates = updater.canCheckForUpdates
       }
     }
-    // Default enablement and the one-day interval come from Info.plist, not setters
-    // on every launch: an explicit user opt-out must survive subsequent launches.
-    controller.startUpdater()
-    isStarted = true
+    // Info.plist owns the default and one-day interval. Do not set them on every launch.
+    do {
+      try updater.start()
+      isStarted = true
+    } catch {
+      isStarted = false
+    }
+  }
+
+  nonisolated static var smokePreviewRequested: Bool {
+    LabRuntime.isSmoke && CommandLine.arguments.contains(previewArgument)
+  }
+
+  /// Scheduled, installable updates stay in the sidebar. Manual checks and special updates keep Sparkle's dialog.
+  nonisolated static func offersInlineDownload(
+    userInitiated: Bool,
+    informationOnly: Bool,
+    majorUpgrade: Bool
+  ) -> Bool {
+    !userInitiated && !informationOnly && !majorUpgrade
   }
 
   func setAutomaticallyChecksForUpdates(_ enabled: Bool) {
-    guard let updater = controller?.updater,
+    guard let updater = sparkle,
           updater.automaticallyChecksForUpdates != enabled else { return }
     updater.automaticallyChecksForUpdates = enabled
   }
 
   func checkForUpdates() {
+    if driver?.revealHeldUpdate() == true { return }
     guard canCheckForUpdates else { return }
-    controller?.checkForUpdates(nil)
+    sparkle?.checkForUpdates()
+  }
+
+  func acceptRailUpdate() {
+    guard let offer = railOffer else { return }
+    if offer.preview {
+      switch offer.phase {
+      case .available:
+        railOffer?.phase = .downloading
+      case .downloading:
+        railOffer?.phase = .ready
+      case .ready:
+        break
+      }
+      return
+    }
+    switch offer.phase {
+    case .available:
+      guard let reply = installReply else { return }
+      installReply = nil
+      driver?.forgetHeldUpdate()
+      railOffer?.phase = .downloading
+      reply(.install)
+    case .ready:
+      guard let reply = readyReply else { return }
+      readyReply = nil
+      reply(.install)
+    case .downloading:
+      break
+    }
+  }
+
+  func presentInstallable(version: String, reply: @escaping (SPUUserUpdateChoice) -> Void) {
+    let stale = installReply
+    installReply = nil
+    readyReply = nil
+    installReply = reply
+    railOffer = RailUpdateOffer(version: version, phase: .available, preview: false)
+    stale?(.dismiss)
+  }
+
+  func presentPreview(version: String) {
+    installReply = nil
+    readyReply = nil
+    railOffer = RailUpdateOffer(version: version, phase: .available, preview: true)
+  }
+
+  func presentReady(reply: @escaping (SPUUserUpdateChoice) -> Void) {
+    guard railOffer?.preview == false else {
+      reply(.dismiss)
+      return
+    }
+    readyReply = reply
+    railOffer?.phase = .ready
+  }
+
+  func clearRailSession() {
+    let install = installReply
+    let ready = readyReply
+    installReply = nil
+    readyReply = nil
+    railOffer = nil
+    install?(.dismiss)
+    ready?(.dismiss)
+  }
+
+  func releaseHeldOffer() {
+    installReply = nil
+    readyReply = nil
+    railOffer = nil
+  }
+
+  var holdsInlineSession: Bool {
+    railOffer?.preview == false && (installReply != nil || readyReply != nil || railOffer?.phase == .downloading)
   }
 }
 
 /// Pin the channel even if a legacy SUFeedURL exists in the preferences domain.
-/// No runtime setter or alternate feed can redirect this fork to upstream Maccy.
 final class WitsCopyUpdateFeedDelegate: NSObject, SPUUpdaterDelegate {
   func feedURLString(for updater: SPUUpdater) -> String? {
     SoftwareUpdater.feedURL
   }
 }
 
-/// Sparkle's update windows (update found, progress, ready to install) come
-/// from its own nibs with an opaque window background. Each one gets the
-/// clipboard panel's glass shell as it appears; Sparkle's layout is untouched.
+/// Forwards Sparkle's standard progress and dialogs, but keeps an ordinary scheduled update in the sidebar.
+final class RailUpdateDriver: NSObject, SPUUserDriver {
+  weak var owner: SoftwareUpdater?
+  private let standard: SPUStandardUserDriver
+  private var heldItem: SUAppcastItem?
+  private var heldState: SPUUserUpdateState?
+  private var heldReply: ((SPUUserUpdateChoice) -> Void)?
+
+  init(hostBundle: Bundle, glass: UpdateWindowGlass) {
+    standard = SPUStandardUserDriver(hostBundle: hostBundle, delegate: glass)
+    super.init()
+  }
+
+  func forgetHeldUpdate() {
+    heldItem = nil
+    heldState = nil
+    heldReply = nil
+  }
+
+  func revealHeldUpdate() -> Bool {
+    guard let item = heldItem, let state = heldState, let reply = heldReply else { return false }
+    heldItem = nil
+    heldState = nil
+    heldReply = nil
+    owner?.releaseHeldOffer()
+    standard.showUpdateFound(with: item, state: state, reply: reply)
+    standard.showUpdateInFocus()
+    return true
+  }
+
+  func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {
+    standard.show(request, reply: reply)
+  }
+
+  func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {
+    standard.showUserInitiatedUpdateCheck(cancellation: cancellation)
+  }
+
+  func showUpdateFound(with item: SUAppcastItem, state: SPUUserUpdateState, reply: @escaping (SPUUserUpdateChoice) -> Void) {
+    guard SoftwareUpdater.offersInlineDownload(
+      userInitiated: state.userInitiated,
+      informationOnly: item.isInformationOnlyUpdate,
+      majorUpgrade: item.isMajorUpgrade
+    ) else {
+      standard.showUpdateFound(with: item, state: state, reply: reply)
+      return
+    }
+    heldItem = item
+    heldState = state
+    heldReply = reply
+    owner?.presentInstallable(version: item.displayVersionString, reply: reply)
+  }
+
+  func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {
+    standard.showUpdateReleaseNotes(with: downloadData)
+  }
+
+  func showUpdateReleaseNotesFailedToDownloadWithError(_ error: any Error) {
+    standard.showUpdateReleaseNotesFailedToDownloadWithError(error)
+  }
+
+  func showUpdateNotFoundWithError(_ error: any Error, acknowledgement: @escaping () -> Void) {
+    standard.showUpdateNotFoundWithError(error, acknowledgement: acknowledgement)
+  }
+
+  func showUpdaterError(_ error: any Error, acknowledgement: @escaping () -> Void) {
+    clearHeld()
+    owner?.clearRailSession()
+    standard.showUpdaterError(error, acknowledgement: acknowledgement)
+  }
+
+  func showDownloadInitiated(cancellation: @escaping () -> Void) {
+    standard.showDownloadInitiated(cancellation: cancellation)
+  }
+
+  func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
+    standard.showDownloadDidReceiveExpectedContentLength(expectedContentLength)
+  }
+
+  func showDownloadDidReceiveData(ofLength length: UInt64) {
+    standard.showDownloadDidReceiveData(ofLength: length)
+  }
+
+  func showDownloadDidStartExtractingUpdate() {
+    standard.showDownloadDidStartExtractingUpdate()
+  }
+
+  func showExtractionReceivedProgress(_ progress: Double) {
+    standard.showExtractionReceivedProgress(progress)
+  }
+
+  func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
+    guard owner?.holdsInlineSession == true else {
+      standard.showReady(toInstallAndRelaunch: reply)
+      return
+    }
+    owner?.presentReady(reply: reply)
+  }
+
+  func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {
+    standard.showInstallingUpdate(
+      withApplicationTerminated: applicationTerminated,
+      retryTerminatingApplication: retryTerminatingApplication
+    )
+  }
+
+  func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
+    clearHeld()
+    owner?.clearRailSession()
+    standard.showUpdateInstalledAndRelaunched(relaunched, acknowledgement: acknowledgement)
+  }
+
+  func dismissUpdateInstallation() {
+    clearHeld()
+    owner?.clearRailSession()
+    standard.dismissUpdateInstallation()
+  }
+
+  func showUpdateInFocus() {
+    if revealHeldUpdate() { return }
+    standard.showUpdateInFocus()
+  }
+
+  private func clearHeld() {
+    heldItem = nil
+    heldState = nil
+    heldReply = nil
+  }
+}
+
+/// Sparkle's update windows come from its own nibs. Each one gets the clipboard panel's glass shell.
 final class UpdateWindowGlass: NSObject, SPUStandardUserDriverDelegate {
   private var observers: [NSObjectProtocol] = []
 
@@ -94,8 +338,6 @@ final class UpdateWindowGlass: NSObject, SPUStandardUserDriverDelegate {
     observers.forEach(NotificationCenter.default.removeObserver)
   }
 
-  /// Sparkle builds the window right after this; adopt before the first paint
-  /// where possible. The notifications above catch any window shown later.
   func standardUserDriverWillHandleShowingUpdate(
     _ handleShowingUpdate: Bool,
     forUpdate update: SUAppcastItem,

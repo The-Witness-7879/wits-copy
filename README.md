@@ -36,6 +36,7 @@ Wit's Copy checks for updates once a day. Turn this off, or check manually, in
 | Open a copied URL or path | Link / folder button in the preview toolbar |
 | Play / pause audio or video | <kbd>Space</kbd> while previewing media |
 | Settings | <kbd>⌘</kbd><kbd>,</kbd> |
+| Update when notified | **Download Update** appears above Settings after a new version is found; choose **Restart and Update** when ready |
 
 ## Privacy
 
@@ -101,6 +102,7 @@ Wit's Copy 是常驻 macOS 菜单栏的剪贴板历史工具。复制过的文�
   「应用程序」。需要 macOS 14 或更高版本。应用未经 Apple 公证，首次打开如被拦截，到「系统设置 → 隐私与安全性」
   选择「仍要打开」。粘贴到其他应用需要辅助功能权限，更新后系统可能要求重新授权。
 - **分类切换**：点击预览右下角的分类胶囊，在窗内上拉列表中选择另一个分类。
+- **更新提醒**：自动检查发现新版本后，「设置」上方会出现「下载更新」；准备完成后可选择「重启并更新」。没有更新时不显示，关闭自动检查的选择继续有效。
 - **全部清除**：每次都需确认；「设置 → 存储」可选择保留带标签的内容，默认开启。
 - **跳转**：复制的网址或本机路径，可通过预览工具栏的链接／文件夹按钮打开；文件会在访达中定位。
 - **隐私**：历史只保存在 `~/Library/Application Support/Wit's Copy/`，应用不会上传。应用会联网检查更新；主动打开网址时由默认浏览器访问，预览本身不抓取网页。

@@ -50,7 +50,7 @@ final class About {
     let panel = self.panel ?? makePanel()
     self.panel = panel
     // Sparkle refuses a second check while one runs; say so instead of a dead link.
-    updateButton?.isEnabled = MainActor.assumeIsolated { AppState.shared.softwareUpdater.canCheckForUpdates }
+    updateButton?.isEnabled = MainActor.assumeIsolated { AppState.shared.softwareUpdater.canOpenUpdate }
     if let screen = NSScreen.main {
       panel.setFrameOrigin(NSPoint(
         x: screen.visibleFrame.midX - panel.frame.width / 2,

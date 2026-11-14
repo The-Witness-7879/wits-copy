@@ -11,6 +11,12 @@
 "preferences" = "Settings…";
 "rail_settings" = "Settings";
 "rail_settings_help" = "Open Settings (⌘,)";
+"rail_update_download" = "Download Update";
+"rail_update_download_help" = "Download the new version";
+"rail_update_busy" = "Downloading";
+"rail_update_busy_help" = "The update is downloading and being verified";
+"rail_update_restart" = "Restart and Update";
+"rail_update_restart_help" = "Quit and install the prepared update";
 "clear_alert_cancel" = "Cancel";
 "clear_alert_confirm" = "Clear";
 "tag_placeholder" = "Tag";

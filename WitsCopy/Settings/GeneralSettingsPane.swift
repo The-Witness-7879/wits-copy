@@ -32,7 +32,7 @@ struct GeneralSettingsPane: View {
           }
           // Small, so it overhangs the checkbox line by only 1.5pt each side.
           .controlSize(.small)
-          .disabled(!AppState.shared.softwareUpdater.canCheckForUpdates)
+          .disabled(!AppState.shared.softwareUpdater.canOpenUpdate)
           .help(Text("CheckNowTooltip", tableName: "GeneralSettings"))
         }
         LaunchAtLogin.Toggle {
