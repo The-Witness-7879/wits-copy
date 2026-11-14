@@ -23,6 +23,11 @@ enum LabRuntime {
 
   static let snippetSource = "local.thewitness.WitsCopy.snippet"
 
+  /// Items created inside the app keep their stored marker, but present as this app.
+  static func sourceBundleIdentifier(_ stored: String?) -> String? {
+    stored == snippetSource ? bundleIdentifier : stored
+  }
+
   static var fixturesDirectory: URL? {
     guard let flag = CommandLine.arguments.firstIndex(of: "--lab-fixtures"),
           CommandLine.arguments.indices.contains(flag + 1) else {

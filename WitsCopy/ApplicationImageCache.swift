@@ -28,6 +28,10 @@ class ApplicationImageCache {
       return universalClipboardIdentifier
     }
 
+    if item.application == LabRuntime.snippetSource {
+      return LabRuntime.bundleIdentifier
+    }
+
     if let bundleIdentifier = item.application {
       return bundleIdentifier
     }

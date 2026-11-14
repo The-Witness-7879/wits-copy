@@ -24,7 +24,6 @@
 "tag_on_item" = "On this item";
 "tag_existing" = "Existing";
 "save_failed" = "Could not save";
-"snippet_source" = "Snippet";
 "unknown_source" = "No source";
 "kind_text" = "Text";
 "kind_image" = "Image";

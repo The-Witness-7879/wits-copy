@@ -42,16 +42,17 @@ class HistoryItemDecoratorTests: XCTestCase {
     XCTAssertNil(itemDecorator.thumbnailImage)
   }
 
-  func testSnippetSourceUsesSystemSymbolInsteadOfApplicationImage() {
+  func testSnippetSourceUsesTheWitsCopyIcon() {
     let item = HistoryItem(contents: [])
     item.application = LabRuntime.snippetSource
     let decorator = HistoryItemDecorator(item)
 
-    guard case .systemSymbol(let name) = decorator.applicationImage else {
-      return XCTFail("snippets must bypass bundle icon caching and raw NSImage rendering")
+    guard case .application(let image) = decorator.applicationImage else {
+      return XCTFail("items created in WitsCopy must use the app icon, not a note symbol")
     }
-    XCTAssertEqual(name, "note.text")
-    XCTAssertEqual(item.application, LabRuntime.snippetSource, "source metadata must remain unchanged")
+    XCTAssertEqual(image.bundleIdentifier, LabRuntime.bundleIdentifier)
+    XCTAssertEqual(decorator.application, "WitsCopy")
+    XCTAssertEqual(item.application, LabRuntime.snippetSource, "stored source marker must remain unchanged")
   }
 
   func testApplicationSourceKeepsBundleIconCache() {

@@ -24,7 +24,6 @@
 "tag_on_item" = "此项";
 "tag_existing" = "已有";
 "save_failed" = "未能保存";
-"snippet_source" = "常用项";
 "unknown_source" = "无来源";
 "kind_text" = "文本";
 "kind_image" = "图片";

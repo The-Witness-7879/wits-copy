@@ -36,17 +36,14 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
   var contentRevision: Int = 0
 
   var application: String? {
-    if item.application == LabRuntime.snippetSource {
-      return NSLocalizedString("snippet_source", comment: "")
-    }
     if item.universalClipboard {
       return "iCloud"
     }
 
-    guard let bundle = item.application,
+    guard let bundle = LabRuntime.sourceBundleIdentifier(item.application),
       let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle)
     else {
-      return nil
+      return item.application == LabRuntime.snippetSource ? "WitsCopy" : nil
     }
 
     return url.deletingPathExtension().lastPathComponent
@@ -116,11 +113,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     self.item = item
     self.shortcuts = shortcuts
     self.title = item.title
-    if item.application == LabRuntime.snippetSource {
-      self.applicationImage = .systemSymbol("note.text")
-    } else {
-      self.applicationImage = .application(ApplicationImageCache.shared.getImage(item: item))
-    }
+    self.applicationImage = .application(ApplicationImageCache.shared.getImage(item: item))
 
     synchronizeItemPin()
     synchronizeItemTitle()
