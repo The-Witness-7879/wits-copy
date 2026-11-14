@@ -26,7 +26,8 @@ struct KeyHandlingView<Content: View>: View {
           }
         }
 
-        if appState.tagEditorItem != nil {
+        // Row popovers own input even during the initial field-focus handoff.
+        if appState.tagEditorItem != nil || appState.titleEditorItem != nil || appState.directoryFormPresented {
           return .ignored
         }
 
@@ -212,7 +213,7 @@ struct KeyHandlingView<Content: View>: View {
 enum PanelKeyPolicy {
   @MainActor
   static func defersToLocalEditor(_ responder: NSResponder?) -> Bool {
-    if WorkspaceTagNameField.owns(responder) { return true }
+    if GlassTextField.owns(responder) { return true }
     if responder is RichTextBodyView { return true }
     if let recorder = responder as? PinnedShortcutRecorder, recorder.recording { return true }
     if responder is OriginalTextBodyView { return true }
@@ -239,7 +240,7 @@ enum PanelKeyPolicy {
 enum PanelPinRoute {
   @MainActor
   static func consume(_ event: NSEvent) -> Bool {
-    guard event.type == .keyDown else { return false }
+    guard event.type == .keyDown, AppState.shared.titleEditorItem == nil else { return false }
     if PopupChord.matches(event) { return true }
     let flags = event.modifierFlags
       .intersection(.deviceIndependentFlagsMask)

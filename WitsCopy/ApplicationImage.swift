@@ -1,6 +1,12 @@
 import Defaults
 import SwiftUI
 
+/// Keeps built-in template symbols out of the application bundle image path.
+enum SourceIcon {
+  case application(ApplicationImage)
+  case systemSymbol(String)
+}
+
 class ApplicationImage {
   fileprivate static let fallbackImage = NSImage(
     systemSymbolName: "questionmark.app.dashed",

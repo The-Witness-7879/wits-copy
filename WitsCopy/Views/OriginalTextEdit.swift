@@ -551,7 +551,9 @@ struct OriginalTextEditSection: View {
       editingBody = false
     }
     guard !item.isRemoved, let stored = OriginalTextEdit.draft(from: item.item) else { return }
-    let draft = appState.textDraft(for: id) ?? stored
+    // This editor owns only the body. A retained, invisible title must not undo
+    // a rename made through the row popover while that body draft was retained.
+    let draft = OriginalTextDraft(title: stored.title, body: appState.textDraft(for: id)?.body ?? stored.body)
     title = draft.title
     bodyText = draft.body
     buffer.title = draft.title

@@ -70,6 +70,7 @@ struct HistoryListView: View {
     let historyEmpty = unpinnedItems.isEmpty
     let topSeparatorVisible = !historyEmpty && (topPinsVisible || pasteStackVisible)
     let bottomSeparatorVisible = !historyEmpty && bottomPinsVisible
+    let hasLeadingBlock = pasteStackVisible || topPinsVisible
     let scrollTopPadding = topSeparatorVisible ? Popup.verticalSeparatorPadding : topPadding
     let scrollBottomPadding = bottomPadding
 
@@ -91,7 +92,7 @@ struct HistoryListView: View {
         topSeparator()
       }
     }
-    .padding(.top, topSeparatorVisible ? topPadding : 0)
+    .padding(.top, hasLeadingBlock ? topPadding : 0)
     .padding(.leading, WorkspaceInsets.listOuter)
     .readHeight(appState, into: \.popup.extraTopHeight)
 

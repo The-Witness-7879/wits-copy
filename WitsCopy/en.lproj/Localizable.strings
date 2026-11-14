@@ -69,7 +69,9 @@
 "pdf_next_page" = "Next page";
 "kind_video" = "Video";
 "kind_audio" = "Audio";
-"create_snippet" = "New pin";
+"create_snippet" = "New";
+"item_create_title" = "Title";
+"item_create_body" = "Content";
 "about_summary" = "A clipboard history that lives in the menu bar. Text, images, and files you copy are kept automatically — search, pin, and tag them, and preview before you paste. History is stored only on this Mac and is never uploaded by the app.";
 "clear_all_alert_message" = "Clear every item?";
 "clear_all_alert_comment" = "Pinned and tagged items are deleted too. This cannot be undone.";
@@ -141,7 +143,14 @@
 "paste_copy_only" = "Copy Only";
 "paste_copy_only_help" = "Copy to the clipboard without pasting";
 "paste_cancel_help" = "Neither copy nor paste";
-"snippet_title_field" = "Title";
+"snippet_title_field" = "Name (optional)";
+"row_rename" = "Rename";
+"row_rename_help" = "Change the name without changing copied content.";
+"title_name_placeholder" = "Name";
+"edit_save" = "Save";
+"edit_cancel" = "Cancel";
+"edit_cancel_help" = "Cancel";
+"title_save_help" = "Save";
 "snippet_body_field" = "Content";
 "snippet_add" = "Add";
 "tag_merge_heading" = "Merge “%@” into";

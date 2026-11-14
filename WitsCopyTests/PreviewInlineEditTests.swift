@@ -514,7 +514,7 @@ final class PreviewInlineEditTests: XCTestCase {
       contents.append(HistoryItemContent(type: NSPasteboard.PasteboardType.rtf.rawValue, value: rtf))
     }
     let item = HistoryItem(contents: contents)
-    item.title = "原标题"
+    XCTAssertTrue(item.setCustomTitle("原标题"))
     item.pin = "s"
     item.tags = ["kept"]
     item.application = "com.example.html-edit"

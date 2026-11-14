@@ -5,6 +5,76 @@ import Defaults
 // swiftlint:disable force_try
 @MainActor
 class HistoryItemTests: XCTestCase {
+  func testAutomaticTitleTracksBodyAndCustomTitleSurvivesUntilRestored() {
+    let item = historyItem("first@example.invalid")
+    item.restoreAutomaticTitle()
+    XCTAssertEqual(item.titleIsCustom, false)
+    item.contents.first?.value = Data("latest@example.invalid".utf8)
+    item.syncAutomaticTitle()
+    XCTAssertEqual(item.title, "latest@example.invalid")
+
+    XCTAssertTrue(item.setCustomTitle("邮箱"))
+    let bytes = item.contents.map(\.value)
+    item.syncAutomaticTitle()
+    XCTAssertEqual(item.title, "邮箱")
+    XCTAssertEqual(item.contents.map(\.value), bytes)
+    item.contents.first?.value = Data("work@example.invalid".utf8)
+    item.syncAutomaticTitle()
+    XCTAssertEqual(item.title, "邮箱")
+    XCTAssertTrue(item.setCustomTitle("工作邮箱"))
+    XCTAssertEqual(item.title, "工作邮箱")
+    item.restoreAutomaticTitle()
+    XCTAssertFalse(item.isTitleCustom)
+    XCTAssertEqual(item.title, "work@example.invalid")
+    XCTAssertFalse(item.setCustomTitle("  \n"))
+    XCTAssertFalse(item.isTitleCustom)
+  }
+
+  func testLegacyTitleSourceMigrationIsConservativeAndRunsOnlyOnce() {
+    let automatic = historyItem("current body")
+    automatic.title = ""
+    automatic.titleIsCustom = nil
+    XCTAssertTrue(automatic.migrateLegacyTitleSource())
+    XCTAssertEqual(automatic.titleIsCustom, false)
+    automatic.syncAutomaticTitle()
+    XCTAssertEqual(automatic.title, "current body")
+    let custom = historyItem("current body")
+    custom.title = "past title"
+    custom.titleIsCustom = nil
+    XCTAssertTrue(custom.migrateLegacyTitleSource())
+    XCTAssertEqual(custom.title, "past title")
+    XCTAssertTrue(custom.isTitleCustom)
+    custom.contents.first?.value = Data("past title".utf8)
+    XCTAssertFalse(custom.migrateLegacyTitleSource())
+    XCTAssertTrue(custom.isTitleCustom)
+  }
+
+  func testLegacyTitleEqualToGeneratedTitleIsNotProofOfAutomaticSource() {
+    let item = historyItem("legacy body")
+    XCTAssertEqual(item.titleIsCustom, false, "new items still start explicitly automatic")
+    let oldTitle = item.generateTitle()
+    XCTAssertEqual(item.title, oldTitle)
+    item.titleIsCustom = nil
+    XCTAssertTrue(item.migrateLegacyTitleSource())
+    XCTAssertTrue(item.isTitleCustom)
+    item.contents.first?.value = Data("edited body".utf8)
+    item.syncAutomaticTitle()
+    XCTAssertEqual(item.title, oldTitle)
+    XCTAssertFalse(item.migrateLegacyTitleSource())
+  }
+
+  func testLegacyImageTitleIsPreservedWithoutDecoding() {
+    let item = HistoryItem(contents: [
+      HistoryItemContent(type: NSPasteboard.PasteboardType.png.rawValue, value: Data([0x89, 0x50, 0x4e, 0x47]))
+    ])
+    item.title = "旧图片名称"
+    item.titleIsCustom = nil
+    XCTAssertTrue(item.migrateLegacyTitleSource())
+    XCTAssertTrue(item.isTitleCustom)
+    XCTAssertEqual(item.title, "旧图片名称")
+    XCTAssertEqual(item.imageMaterializations, 0)
+  }
+
   func testTitleForString() {
     let title = "foo"
     let item = historyItem(title)
@@ -79,7 +149,7 @@ class HistoryItemTests: XCTestCase {
     let item = HistoryItem()
     Storage.shared.context.insert(item)
     item.contents = [fileURLContent, textContent, universalClipboardContent]
-    item.title = item.generateTitle()
+    item.restoreAutomaticTitle()
     XCTAssertEqual(item.title, "foo.bar")
   }
 
@@ -112,7 +182,7 @@ class HistoryItemTests: XCTestCase {
     let item = HistoryItem()
     Storage.shared.context.insert(item)
     item.contents = [fileURLContent, universalClipboardContent]
-    item.title = item.generateTitle()
+    item.restoreAutomaticTitle()
     XCTAssertEqual(item.title, "file:///tmp/foo.bar")
   }
 
@@ -145,9 +215,13 @@ class HistoryItemTests: XCTestCase {
   func testManualImageTitleIsNotReplacedByGenerateTitle() {
     let image = NSImage(named: "NSBluetoothTemplate")!
     let item = historyItem(image)
-    item.title = "手工标题"
-    XCTAssertEqual(item.generateTitle(), "手工标题")
+    XCTAssertTrue(item.setCustomTitle("手工标题"))
+    XCTAssertEqual(item.generateTitle(), "")
+    item.syncAutomaticTitle()
     XCTAssertEqual(item.title, "手工标题")
+    item.restoreAutomaticTitle()
+    XCTAssertEqual(item.title, "")
+    XCTAssertFalse(item.isTitleCustom)
   }
 
   func testHasImagePayloadDoesNotMaterializeBitmap() {
@@ -681,7 +755,7 @@ class HistoryItemTests: XCTestCase {
     let item = HistoryItem()
     Storage.shared.context.insert(item)
     item.contents = contents
-    item.title = item.generateTitle()
+    item.restoreAutomaticTitle()
 
     return item
   }
@@ -696,7 +770,7 @@ class HistoryItemTests: XCTestCase {
     let item = HistoryItem()
     Storage.shared.context.insert(item)
     item.contents = contents
-    item.title = item.generateTitle()
+    item.restoreAutomaticTitle()
 
     return item
   }
@@ -711,7 +785,7 @@ class HistoryItemTests: XCTestCase {
     let item = HistoryItem()
     Storage.shared.context.insert(item)
     item.contents = contents
-    item.title = item.generateTitle()
+    item.restoreAutomaticTitle()
 
     return item
   }
@@ -730,7 +804,7 @@ class HistoryItemTests: XCTestCase {
     let item = HistoryItem()
     Storage.shared.context.insert(item)
     item.contents = contents
-    item.title = item.generateTitle()
+    item.restoreAutomaticTitle()
 
     return item
   }

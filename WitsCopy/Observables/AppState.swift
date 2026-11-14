@@ -26,7 +26,17 @@ class AppState: Sendable {
     Defaults[.showSearch]
   }
 
+  var titleEditorItem: HistoryItemDecorator?
   var tagEditorItem: HistoryItemDecorator?
+  /// Rename and create popovers are not the panel. Return must not select a row and hide it.
+  private(set) var directoryFormDepth = 0
+  var directoryFormPresented: Bool { directoryFormDepth > 0 }
+
+  func beginDirectoryForm() { directoryFormDepth += 1 }
+
+  func endDirectoryForm() {
+    if directoryFormDepth > 0 { directoryFormDepth -= 1 }
+  }
   var tagEditorAnchor: TagEditorAnchor?
   /// Preview-only shortcut editor. The row-end recorder stays the other entry.
   var previewShortcutItemID: UUID?
@@ -56,6 +66,7 @@ class AppState: Sendable {
     didSet {
       guard panelPresented != oldValue else { return }
       if !panelPresented {
+        clearTitleEditor()
         clearTagEditor()
         previewShortcutItemID = nil
         endPinRecordingSession()
@@ -172,7 +183,7 @@ class AppState: Sendable {
   var focusContext: PanelFocusContext {
     PanelFocusContext(
       windowPinned: windowPinned,
-      tagPopoverPresented: tagEditorItem != nil,
+      tagPopoverPresented: tagEditorItem != nil || titleEditorItem != nil,
       confirmationPresented: deleteConfirmationPresented || footer.items.contains(where: \.showConfirmation),
       menuPresented: menuTracking
     )
@@ -192,6 +203,7 @@ class AppState: Sendable {
     // tag editor here releases the inline editor key while the tag field, not
     // the new recorder, still owns it. Doing that after makeFirstResponder
     // would resign the recorder and cancel the session just opened.
+    clearTitleEditor()
     if tagEditorItem != nil {
       clearTagEditor()
     }
@@ -240,6 +252,7 @@ class AppState: Sendable {
     if let id = previewShortcutItemID {
       dismissPreviewShortcutEditor(itemID: id)
     }
+    clearTitleEditor()
     if tagEditorItem != nil {
       clearTagEditor()
     }
@@ -391,8 +404,9 @@ class AppState: Sendable {
       return .stale
     }
     let item = decorator.item
-    if let baseline,
-       (item.text ?? "") != baseline.body || item.title != baseline.title {
+    // The body editor does not own the title. A rename after the editor opened
+    // must not block the body save or be undone by the editor's old title.
+    if let baseline, (item.text ?? "") != baseline.body {
       let message = NSLocalizedString(
         "edit_conflict",
         value: "The original changed. Nothing was overwritten.",
@@ -402,10 +416,14 @@ class AppState: Sendable {
       retainTextDraft(draft, itemID: itemID)
       return .rejected(message)
     }
+    let titleDrifted = baseline.map { item.title != $0.title } ?? false
     let previousTitle = item.title
+    let previousTitleSource = item.titleIsCustom
+    let previousHighlight = decorator.attributedTitle
     let previousBytes = item.contents.map { ($0, $0.value) }
+    let previousBody = item.text ?? ""
     let removedSync = OriginalTextPayload.sync(item, body: draft.body)
-    let removedRich = draft.body != (baseline?.body ?? item.text ?? "")
+    let removedRich = draft.body != (baseline?.body ?? previousBody)
       ? OriginalTextPayload.stripRich(item)
       : []
     let removed = removedSync + removedRich
@@ -416,8 +434,11 @@ class AppState: Sendable {
       textEditErrors[itemID] = OriginalTextRefusal.notText.explanation
       return .rejected(OriginalTextRefusal.notText.explanation)
     }
-    let trimmedTitle = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
-    item.title = trimmedTitle.isEmpty ? item.generateTitle() : draft.title
+    if !titleDrifted, draft.title != (baseline?.title ?? previousTitle) {
+      item.applyTitleEdit(draft.title)
+    } else if !titleDrifted {
+      item.syncAutomaticTitle()
+    }
     decorator.title = item.title
     decorator.attributedTitle = nil
     do {
@@ -431,7 +452,9 @@ class AppState: Sendable {
     } catch {
       OriginalTextPayload.restore(item, bytes: previousBytes, removed: removed)
       item.title = previousTitle
+      item.titleIsCustom = previousTitleSource
       decorator.title = previousTitle
+      decorator.attributedTitle = previousHighlight
       let message = error.localizedDescription
       storageError = message
       textEditErrors[itemID] = message
@@ -522,10 +545,30 @@ class AppState: Sendable {
     beginTagEdit(for: item, anchor: .row)
   }
 
+  @MainActor
+  func beginTitleEdit(for item: HistoryItemDecorator) {
+    guard !item.isRemoved else { return }
+    clearTagEditor()
+    endPinRecordingSession()
+    previewShortcutItemID = nil
+    storageError = nil
+    titleEditorItem = item
+  }
+
+  func clearTitleEditor() {
+    titleEditorItem = nil
+  }
+
+  func dismissTitleEditor(itemID: UUID) {
+    guard titleEditorItem?.id == itemID else { return }
+    clearTitleEditor()
+  }
+
   /// One editor. The same item and anchor toggles off; a different source replaces it.
   @MainActor
   func beginTagEdit(for item: HistoryItemDecorator, anchor: TagEditorAnchor = .row) {
     guard !item.isRemoved else { return }
+    clearTitleEditor()
     if tagEditorItem?.id == item.id, tagEditorAnchor == anchor {
       clearTagEditor()
       return
@@ -1019,6 +1062,10 @@ class AppState: Sendable {
     runFooterItem(item)
   }
 
+  private enum TitleSaveValidationError: Error {
+    case contentChanged
+  }
+
   /// Title-only. Does not touch pasteboard representations.
   @MainActor
   func saveTitlePreservingRich(itemID: UUID, title: String) -> OriginalTextSaveOutcome {
@@ -1028,28 +1075,21 @@ class AppState: Sendable {
       return .stale
     }
     let item = decorator.item
-    let previousTitle = item.title
     let before = item.contents.map { ($0.type, $0.value) }
-    let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-    item.title = trimmed.isEmpty ? item.generateTitle() : title
-    decorator.title = item.title
-    decorator.attributedTitle = nil
-    let after = item.contents.map { ($0.type, $0.value) }
-    guard before.elementsEqual(after, by: { $0.0 == $1.0 && $0.1 == $1.1 }) else {
-      item.title = previousTitle
-      decorator.title = previousTitle
-      return .rejected(NSLocalizedString("edit_conflict", value: "The original changed. Nothing was overwritten.", comment: ""))
-    }
     do {
-      try Storage.shared.save()
+      try decorator.saveTitle(title) {
+        let after = item.contents.map { ($0.type, $0.value) }
+        guard before.elementsEqual(after, by: { $0.0 == $1.0 && $0.1 == $1.1 }) else {
+          throw TitleSaveValidationError.contentChanged
+        }
+      }
       storageError = nil
       textEditErrors.removeValue(forKey: itemID)
-      decorator.noteContentChanged()
       history.refreshVisibleItems(highlightFirst: false)
       return .saved
+    } catch TitleSaveValidationError.contentChanged {
+      return .rejected(NSLocalizedString("edit_conflict", value: "The original changed. Nothing was overwritten.", comment: ""))
     } catch {
-      item.title = previousTitle
-      decorator.title = previousTitle
       let message = error.localizedDescription
       storageError = message
       textEditErrors[itemID] = message
@@ -1088,15 +1128,19 @@ class AppState: Sendable {
       return
     }
     let item = decorator.item
+    let previousTitle = item.title
+    let previousTitleSource = item.titleIsCustom
+    let previousHighlight = decorator.attributedTitle
     if transaction.applyColumnChanges {
       applyRichColumnChanges(transaction.columnChanges, to: item)
     }
     if let title = transaction.title {
-      let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-      item.title = trimmed.isEmpty ? item.generateTitle() : title
-      decorator.title = item.title
-      decorator.attributedTitle = nil
+      item.applyTitleEdit(title)
+    } else if transaction.applyColumnChanges {
+      item.syncAutomaticTitle()
     }
+    decorator.title = item.title
+    decorator.attributedTitle = nil
     do {
       try Storage.shared.save()
       storageError = nil
@@ -1105,8 +1149,10 @@ class AppState: Sendable {
       history.refreshVisibleItems(highlightFirst: false)
     } catch {
       Storage.shared.context.rollback()
-      decorator.title = item.title
-      decorator.attributedTitle = nil
+      item.title = previousTitle
+      item.titleIsCustom = previousTitleSource
+      decorator.title = previousTitle
+      decorator.attributedTitle = previousHighlight
       let message = error.localizedDescription
       storageError = message
       RichTextDraftStore.shared.noteSaveFailed(identity: identity, generation: transaction.generation, message: message)

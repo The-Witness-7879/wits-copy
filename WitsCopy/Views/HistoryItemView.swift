@@ -50,7 +50,8 @@ struct HistoryItemView: View {
   private var rowContent: some View {
     let label = WorkspaceItemLabel.make(
       storedTitle: item.title,
-      filePaths: item.item.fileURLs.map(\.path)
+      filePaths: item.item.fileURLs.map(\.path),
+      titleIsCustom: item.item.isTitleCustom
     )
     let inset = compactRows ? HistoryRowMetrics.compactVerticalInset : HistoryRowMetrics.verticalInset
     let gap = compactRows ? HistoryRowMetrics.compactRowGap : HistoryRowMetrics.rowGap
@@ -139,16 +140,25 @@ struct HistoryItemView: View {
     }
     .popover(
       isPresented: Binding(
-        get: { appState.presentsTagEditor(item, at: .row) },
+        get: { appState.titleEditorItem?.id == item.id || appState.presentsTagEditor(item, at: .row) },
         set: { presented in
-          if !presented { appState.dismissTagEditor(itemID: item.id, anchor: .row) }
+          if !presented {
+            appState.dismissTitleEditor(itemID: item.id)
+            appState.dismissTagEditor(itemID: item.id, anchor: .row)
+          }
         }
       ),
       arrowEdge: .trailing
     ) {
-      TagEditorPopover(item: item, compact: true)
-        .environment(appState)
-        .accessibilityIdentifier("lab-row-tag-editor")
+      if appState.titleEditorItem?.id == item.id {
+        TitleEditorPopover(item: item)
+          .environment(appState)
+          .accessibilityIdentifier("lab-row-title-editor")
+      } else {
+        TagEditorPopover(item: item, compact: true)
+          .environment(appState)
+          .accessibilityIdentifier("lab-row-tag-editor")
+      }
     }
     .accessibilityElement(children: .contain)
     .accessibilityIdentifier("lab-row-chrome-\(item.id.uuidString)")
@@ -160,6 +170,12 @@ struct HistoryItemView: View {
   @ViewBuilder
   private var rowContextMenu: some View {
     let pinned = item.isPinned
+    Button(action: { appState.beginTitleEdit(for: item) }) {
+      Label(NSLocalizedString("row_rename", comment: ""), systemImage: "pencil")
+    }
+    .accessibilityIdentifier("lab-row-rename-\(item.id.uuidString)")
+    .iconHelp(NSLocalizedString("row_rename_help", comment: ""))
+
     Button(action: { appState.beginTagEdit(for: item, anchor: .row) }) {
       Label(
         NSLocalizedString("row_tag", comment: ""),
@@ -185,6 +201,72 @@ struct HistoryItemView: View {
     }
     .accessibilityIdentifier("lab-row-delete-\(item.id.uuidString)")
     .iconHelp(NSLocalizedString("row_delete_help", value: "删除这一条。", comment: ""))
+  }
+}
+
+struct TitleEditorPopover: View {
+  var item: HistoryItemDecorator
+  @Environment(AppState.self) private var appState
+  @State private var draft: String
+  @State private var error: String?
+
+  init(item: HistoryItemDecorator) {
+    self.item = item
+    _draft = State(initialValue: item.title)
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: WorkspaceTagCreatePlacement.titleToField) {
+      Text("tag_rename")
+        .font(.system(size: 13, weight: .semibold))
+        .frame(height: WorkspaceTagCreatePlacement.titleHeight, alignment: .leading)
+      TagDraftField(
+        text: $draft,
+        onSubmit: save,
+        identifier: "lab-title-field",
+        placeholderKey: "title_name_placeholder",
+        onCancel: dismiss
+      )
+      .frame(minHeight: GlassField.height, maxHeight: GlassField.height)
+      FormActions(
+        primaryTitleKey: "edit_save", primaryHelpKey: "title_save_help",
+        cancelIdentifier: "lab-title-cancel", primaryIdentifier: "lab-title-save",
+        onCancel: dismiss, onConfirm: save
+      )
+      .padding(.top, WorkspaceTagCreatePlacement.fieldToButtons - WorkspaceTagCreatePlacement.titleToField)
+      if let error {
+        Text(error)
+          .font(.system(size: 11))
+          .foregroundStyle(.red)
+          .fixedSize(horizontal: false, vertical: true)
+          .accessibilityIdentifier("lab-title-error")
+      }
+    }
+    .padding(WorkspaceTagCreatePlacement.contentInset)
+    .frame(width: WorkspaceTagCreatePlacement.formWidth)
+    .onExitCommand(perform: dismiss)
+    .accessibilityElement(children: .contain)
+  }
+
+  private func save() {
+    let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty {
+      finish(appState.history.restoreAutomaticTitle(item))
+    } else {
+      finish(appState.history.renameTitle(item, to: draft))
+    }
+  }
+
+  private func finish(_ saved: Bool) {
+    if saved {
+      dismiss()
+    } else {
+      error = appState.storageError ?? NSLocalizedString("save_failed", comment: "")
+    }
+  }
+
+  private func dismiss() {
+    appState.dismissTitleEditor(itemID: item.id)
   }
 }
 
@@ -268,17 +350,22 @@ struct TagEditorPopover: View {
 struct TagDraftField: NSViewRepresentable {
   @Binding var text: String
   var onSubmit: () -> Void
+  var identifier = "lab-tag-field"
+  var placeholderKey = "tag_placeholder"
+  var onCancel: (() -> Void)? = nil
 
   func makeCoordinator() -> Coordinator {
-    Coordinator(text: $text, onSubmit: onSubmit)
+    Coordinator(text: $text, onSubmit: onSubmit, onCancel: onCancel)
   }
 
   final class Coordinator: NSObject, NSTextFieldDelegate {
     var text: Binding<String>
     var onSubmit: () -> Void
-    init(text: Binding<String>, onSubmit: @escaping () -> Void) {
+    var onCancel: (() -> Void)?
+    init(text: Binding<String>, onSubmit: @escaping () -> Void, onCancel: (() -> Void)?) {
       self.text = text
       self.onSubmit = onSubmit
+      self.onCancel = onCancel
     }
 
     func controlTextDidChange(_ notification: Notification) {
@@ -287,8 +374,13 @@ struct TagDraftField: NSViewRepresentable {
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+      guard !textView.hasMarkedText() else { return false }
       if commandSelector == #selector(NSResponder.insertNewline(_:)) {
         onSubmit()
+        return true
+      }
+      if commandSelector == #selector(NSResponder.cancelOperation(_:)), let onCancel {
+        onCancel()
         return true
       }
       return false
@@ -301,21 +393,25 @@ struct TagDraftField: NSViewRepresentable {
     field.isEditable = true
     field.isSelectable = true
     field.delegate = context.coordinator
-    field.placeholderString = NSLocalizedString("tag_placeholder", comment: "")
-    field.setAccessibilityIdentifier("lab-tag-field")
+    field.placeholderString = NSLocalizedString(placeholderKey, comment: "")
+    field.setAccessibilityIdentifier(identifier)
     return field
   }
 
   func updateNSView(_ field: NSTextField, context: Context) {
     context.coordinator.text = $text
     context.coordinator.onSubmit = onSubmit
+    context.coordinator.onCancel = onCancel
     let editing = (field.window?.firstResponder as? NSText)?.delegate === field
     if !editing && field.stringValue != text {
       field.stringValue = text
     }
-    field.setAccessibilityIdentifier("lab-tag-field")
-    if let window = field.window, window.canBecomeKey, !editing, window.firstResponder !== field {
-      window.makeFirstResponder(field)
+    field.setAccessibilityIdentifier(identifier)
+    if let window = field.window, window.canBecomeKey {
+      if !window.isKeyWindow { window.makeKey() }
+      if !editing, window.firstResponder !== field {
+        window.makeFirstResponder(field)
+      }
     }
   }
 }

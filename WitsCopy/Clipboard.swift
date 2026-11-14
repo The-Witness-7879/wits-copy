@@ -583,14 +583,13 @@ class Clipboard {
     }
 
     let historyItem = HistoryItem(contents: contents)
+    historyItem.application = sourceBundle
+    historyItem.restoreAutomaticTitle()
 
     if #unavailable(macOS 15.0) {
       // On macOS 14 the history item needs to be inserted into storage directly after creating it.
       try? History.shared.insertIntoStorage(historyItem)
     }
-
-    historyItem.application = sourceBundle
-    historyItem.title = historyItem.generateTitle()
 
     onNewCopyHooks.forEach({ $0(historyItem) })
   }

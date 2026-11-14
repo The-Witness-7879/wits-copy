@@ -50,6 +50,274 @@ class HistoryTests: XCTestCase {
     Defaults[.pinTo] = savedPinTo
   }
 
+  // Leader-only execution (not run by the implementation card):
+  // xcodebuild -project WitsCopy.xcodeproj -scheme WitsCopy -destination 'platform=macOS' \
+  //   -only-testing:WitsCopyTests/HistoryTests -only-testing:WitsCopyTests/HistoryItemTests \
+  //   -only-testing:WitsCopyTests/SearchTests -only-testing:WitsCopyTests/WorkspacePolicyTests test
+  func testRenameRestoreAndFailedSavePreserveBodyAndProvenance() {
+    let row = history.add(historyItem("latest@example.invalid"))
+    row.item.tags = ["work"]
+    row.item.pin = "e"
+    let bytes = row.item.contents.map(\.value)
+    let application = row.item.application
+    XCTAssertFalse(history.renameTitle(row, to: "  "))
+    XCTAssertTrue(history.renameTitle(row, to: " 邮箱 "))
+    XCTAssertEqual(row.title, "邮箱")
+    XCTAssertTrue(row.item.isTitleCustom)
+    XCTAssertTrue(history.renameTitle(row, to: "工作邮箱"))
+    Storage.shared.saveImplementation = { throw CocoaError(.fileWriteUnknown) }
+    XCTAssertFalse(history.restoreAutomaticTitle(row))
+    XCTAssertEqual(row.title, "工作邮箱")
+    XCTAssertEqual(row.item.title, "工作邮箱")
+    XCTAssertTrue(row.item.isTitleCustom)
+    XCTAssertNotNil(AppState.shared.storageError)
+    Storage.shared.saveImplementation = nil
+    XCTAssertTrue(history.restoreAutomaticTitle(row))
+    XCTAssertFalse(row.item.isTitleCustom)
+    XCTAssertEqual(row.title, "latest@example.invalid")
+    XCTAssertEqual(row.item.contents.map(\.value), bytes)
+    XCTAssertEqual(row.item.tags, ["work"])
+    XCTAssertEqual(row.item.pin, "e")
+    XCTAssertEqual(row.item.application, application)
+    XCTAssertNil(AppState.shared.storageError)
+  }
+
+  func testDuplicateCopyInheritsCustomTitleSource() {
+    let original = historyItem("duplicate body")
+    XCTAssertTrue(original.setCustomTitle("邮箱"))
+    history.add(original)
+    let merged = history.add(historyItem("duplicate body"))
+    XCTAssertEqual(merged.item.title, "邮箱")
+    XCTAssertEqual(merged.item.titleIsCustom, true)
+    merged.item.syncAutomaticTitle()
+    XCTAssertEqual(merged.item.title, "邮箱")
+  }
+
+  func testSpecialSymbolsRefreshIncludesHiddenAutomaticRowsOnly() {
+    let saved = Defaults[.showSpecialSymbols]
+    defer { Defaults[.showSpecialSymbols] = saved }
+    Defaults[.showSpecialSymbols] = false
+    let automatic = history.add(historyItem("a\nb"))
+    let custom = history.add(historyItem("c\nd"))
+    XCTAssertTrue(history.renameTitle(custom, to: "邮箱"))
+    history.items = [custom]
+    Defaults[.showSpecialSymbols] = true
+    XCTAssertTrue(history.refreshAutomaticTitles())
+    XCTAssertEqual(automatic.item.title, "a⏎b")
+    XCTAssertEqual(automatic.title, "a⏎b")
+    XCTAssertEqual(custom.item.title, "邮箱")
+    XCTAssertTrue(custom.item.isTitleCustom)
+  }
+
+  func testOriginalBodySaveKeepsCustomTitleAndRegeneratesAutomaticTitle() {
+    for custom in [false, true] {
+      let row = history.add(historyItem(custom ? "custom old" : "automatic old"))
+      if custom { XCTAssertTrue(history.renameTitle(row, to: "邮箱")) }
+      let baseline = OriginalTextDraft(title: row.item.title, body: row.item.text ?? "")
+      let draft = OriginalTextDraft(title: baseline.title, body: "latest body")
+      XCTAssertEqual(AppState.shared.saveOriginalText(itemID: row.id, draft: draft, baseline: baseline), .saved)
+      XCTAssertEqual(row.item.text, "latest body")
+      XCTAssertEqual(row.item.title, custom ? "邮箱" : "latest body")
+      XCTAssertEqual(row.item.titleIsCustom, custom)
+    }
+  }
+
+  func testOriginalSaveFailureRestoresTitleSourceHighlightAndBody() {
+    let row = history.add(historyItem("old body"))
+    let baseline = OriginalTextDraft(title: row.item.title, body: "old body")
+    row.attributedTitle = AttributedString("old highlight")
+    let highlight = row.attributedTitle
+    Storage.shared.saveImplementation = { throw CocoaError(.fileWriteUnknown) }
+    let outcome = AppState.shared.saveOriginalText(
+      itemID: row.id,
+      draft: OriginalTextDraft(title: "邮箱", body: "new body"),
+      baseline: baseline
+    )
+    guard case .failed = outcome else { return XCTFail("expected failed save") }
+    XCTAssertEqual(row.item.title, "old body")
+    XCTAssertEqual(row.title, "old body")
+    XCTAssertEqual(row.item.titleIsCustom, false)
+    XCTAssertEqual(row.item.text, "old body")
+    XCTAssertEqual(row.attributedTitle, highlight)
+  }
+
+  func testTitleOnlySaveAndRichBodySaveUseTheSameTitleState() {
+    let row = history.add(historyItem("first body"))
+    let app = AppState.shared
+    XCTAssertEqual(app.saveTitlePreservingRich(itemID: row.id, title: " 邮箱 "), .saved)
+    XCTAssertTrue(row.item.isTitleCustom)
+    XCTAssertEqual(row.item.title, "邮箱")
+    var transaction = RichTextSaveTransaction(
+      identity: RichTextIdentity.modelKey(row.item), generation: 1, status: .ready,
+      bodyChanged: true, titleChanged: false, title: nil, applyColumnChanges: true,
+      columnChanges: [RichTextColumnChange(
+        type: NSPasteboard.PasteboardType.string.rawValue,
+        action: .replace(Data("latest rich body".utf8)), insertIfMissing: false
+      )], risks: []
+    )
+    app.commitRichTransaction(transaction, decoratorID: row.id)
+    XCTAssertEqual(row.item.text, "latest rich body")
+    XCTAssertEqual(row.item.title, "邮箱")
+    XCTAssertTrue(row.item.isTitleCustom)
+    XCTAssertEqual(app.saveTitlePreservingRich(itemID: row.id, title: ""), .saved)
+    XCTAssertFalse(row.item.isTitleCustom)
+    XCTAssertEqual(row.item.title, "latest rich body")
+    transaction.generation = 2
+    transaction.columnChanges[0].action = .replace(Data("automatic rich body".utf8))
+    app.commitRichTransaction(transaction, decoratorID: row.id)
+    XCTAssertEqual(row.item.title, "automatic rich body")
+    XCTAssertFalse(row.item.isTitleCustom)
+    Storage.shared.saveImplementation = { throw CocoaError(.fileWriteUnknown) }
+    transaction.generation = 3
+    transaction.title = "should roll back"
+    transaction.columnChanges[0].action = .replace(Data("failed rich body".utf8))
+    app.commitRichTransaction(transaction, decoratorID: row.id)
+    XCTAssertEqual(row.item.title, "automatic rich body")
+    XCTAssertEqual(row.title, "automatic rich body")
+    XCTAssertEqual(row.item.text, "automatic rich body")
+    XCTAssertFalse(row.item.isTitleCustom)
+  }
+
+  func testNamedClipboardCaptureStartsAutomaticAndBodySaveRegeneratesTitle() throws {
+    try XCTSkipUnless(LabRuntime.isUnitTestProcess)
+    let oldApps = Defaults[.ignoredApps]
+    let oldWhitelist = Defaults[.ignoreAllAppsExceptListed]
+    let oldTypes = Defaults[.enabledPasteboardTypes]
+    defer {
+      Defaults[.ignoredApps] = oldApps
+      Defaults[.ignoreAllAppsExceptListed] = oldWhitelist
+      Defaults[.enabledPasteboardTypes] = oldTypes
+    }
+    Defaults[.ignoredApps] = []
+    Defaults[.ignoreAllAppsExceptListed] = false
+    Defaults[.enabledPasteboardTypes] = [.string]
+    let board = NSPasteboard.withUniqueName()
+    defer { board.releaseGlobally() }
+    let clipboard = Clipboard(pasteboard: board, sourceAppBundleProvider: { "com.example.title-test" })
+    var captured: HistoryItem?
+    clipboard.onNewCopy { captured = $0 }
+    board.clearContents()
+    board.setString("captured body", forType: .string)
+    clipboard.checkForChangesInPasteboard()
+    let item = try XCTUnwrap(captured)
+    XCTAssertEqual(item.titleIsCustom, false)
+    XCTAssertEqual(item.title, "captured body")
+    let row = history.add(item)
+    let baseline = OriginalTextDraft(title: item.title, body: "captured body")
+    XCTAssertEqual(AppState.shared.saveOriginalText(
+      itemID: row.id, draft: OriginalTextDraft(title: baseline.title, body: "edited capture"), baseline: baseline
+    ), .saved)
+    XCTAssertEqual(item.title, "edited capture")
+    XCTAssertFalse(item.isTitleCustom)
+  }
+
+  func testLoadMigratesLegacyTitleSourcesAndReportsFailedMigration() async throws {
+    let automatic = historyItem("automatic body")
+    automatic.title = ""
+    automatic.titleIsCustom = nil
+    let custom = historyItem("custom body")
+    custom.title = "邮箱"
+    custom.titleIsCustom = nil
+    try Storage.shared.context.save()
+    Storage.shared.saveImplementation = { throw CocoaError(.fileWriteUnknown) }
+    do {
+      try await history.load()
+      XCTFail("migration failure must be reported")
+    } catch {
+      XCTAssertNotNil(AppState.shared.storageError)
+    }
+    XCTAssertNil(automatic.titleIsCustom)
+    XCTAssertNil(custom.titleIsCustom)
+    XCTAssertEqual(custom.title, "邮箱")
+    Storage.shared.saveImplementation = nil
+    try await history.load()
+    XCTAssertEqual(automatic.titleIsCustom, false)
+    XCTAssertEqual(custom.titleIsCustom, true)
+    XCTAssertEqual(custom.title, "邮箱")
+    XCTAssertNil(AppState.shared.storageError)
+    // An explicitly automatic record is never reclassified from an outdated title.
+    automatic.contents.first?.value = Data("changed body".utf8)
+    try await history.load()
+    XCTAssertEqual(automatic.titleIsCustom, false)
+  }
+
+  func testLoadedLegacyTitleEqualToGeneratedSurvivesBodyEdit() async throws {
+    let row = history.add(historyItem("legacy body"))
+    let oldTitle = row.item.generateTitle()
+    XCTAssertEqual(row.item.title, oldTitle)
+    row.item.titleIsCustom = nil
+    try Storage.shared.context.save()
+    try await history.load()
+    XCTAssertEqual(row.item.titleIsCustom, true)
+    let baseline = OriginalTextDraft(title: oldTitle, body: "legacy body")
+    XCTAssertEqual(AppState.shared.saveOriginalText(
+      itemID: row.id,
+      draft: OriginalTextDraft(title: oldTitle, body: "edited body"),
+      baseline: baseline
+    ), .saved)
+    XCTAssertEqual(row.item.text, "edited body")
+    XCTAssertEqual(row.item.title, oldTitle)
+    XCTAssertEqual(row.title, oldTitle)
+    XCTAssertTrue(row.item.isTitleCustom)
+  }
+
+  func testSnippetNameIsOptionalAndSetsExplicitTitleSource() throws {
+    let automatic = try XCTUnwrap(History.makeSnippetItem(title: "  ", text: "snippet body", pin: ""))
+    XCTAssertEqual(automatic.title, "snippet body")
+    XCTAssertEqual(automatic.titleIsCustom, false)
+    let custom = try XCTUnwrap(History.makeSnippetItem(title: " 邮箱 ", text: "other body", pin: ""))
+    XCTAssertEqual(custom.title, "邮箱")
+    XCTAssertEqual(custom.titleIsCustom, true)
+    XCTAssertEqual(custom.text, "other body")
+  }
+
+  func testTitleOnlyFailureRestoresAutomaticSourceAndHighlight() {
+    let row = history.add(historyItem("unchanged body"))
+    row.attributedTitle = AttributedString("highlight")
+    let highlight = row.attributedTitle
+    let bytes = row.item.contents.map(\.value)
+    Storage.shared.saveImplementation = { throw CocoaError(.fileWriteUnknown) }
+    let outcome = AppState.shared.saveTitlePreservingRich(itemID: row.id, title: "邮箱")
+    guard case .failed = outcome else { return XCTFail("expected failed title-only save") }
+    XCTAssertEqual(row.title, "unchanged body")
+    XCTAssertEqual(row.item.title, "unchanged body")
+    XCTAssertEqual(row.item.titleIsCustom, false)
+    XCTAssertEqual(row.attributedTitle, highlight)
+    XCTAssertEqual(row.item.contents.map(\.value), bytes)
+  }
+
+  func testRichExplicitTitleAndRestoreDoNotRewriteBody() {
+    let row = history.add(historyItem("rich current body"))
+    let bytes = row.item.contents.map(\.value)
+    var transaction = RichTextSaveTransaction(
+      identity: RichTextIdentity.modelKey(row.item), generation: 1, status: .titleOnly,
+      bodyChanged: false, titleChanged: true, title: " 邮箱 ", applyColumnChanges: false,
+      columnChanges: [], risks: []
+    )
+    AppState.shared.commitRichTransaction(transaction, decoratorID: row.id)
+    XCTAssertEqual(row.item.title, "邮箱")
+    XCTAssertTrue(row.item.isTitleCustom)
+    transaction.generation = 2
+    transaction.title = ""
+    AppState.shared.commitRichTransaction(transaction, decoratorID: row.id)
+    XCTAssertEqual(row.item.title, "rich current body")
+    XCTAssertFalse(row.item.isTitleCustom)
+    XCTAssertEqual(row.item.contents.map(\.value), bytes)
+  }
+
+  func testBodySaveKeepsALaterRenameAndWritesTheDraft() {
+    let row = history.add(historyItem("old body"))
+    let baseline = OriginalTextDraft(title: row.item.title, body: "old body")
+    XCTAssertTrue(history.renameTitle(row, to: "邮箱"))
+    let outcome = AppState.shared.saveOriginalText(
+      itemID: row.id, draft: OriginalTextDraft(title: baseline.title, body: "draft body"), baseline: baseline
+    )
+    XCTAssertEqual(outcome, .saved)
+    XCTAssertEqual(row.item.title, "邮箱")
+    XCTAssertTrue(row.item.isTitleCustom)
+    XCTAssertEqual(row.item.text, "draft body")
+  }
+
   func testDefaultIsEmpty() {
     XCTAssertEqual(history.items, [])
   }
@@ -62,7 +330,7 @@ class HistoryTests: XCTestCase {
 
   func testAddingSame() {
     let first = historyItem("foo")
-    first.title = "xyz"
+    first.setCustomTitle("xyz")
     first.application = "iTerm.app"
     history.add(first)
     first.pin = "f"
@@ -100,7 +368,7 @@ class HistoryTests: XCTestCase {
     Storage.shared.context.insert(firstItem)
     firstItem.application = "WitsCopy.app"
     firstItem.contents = firstContents
-    firstItem.title = firstItem.generateTitle()
+    firstItem.restoreAutomaticTitle()
     history.add(firstItem)
 
     let secondContents = [
@@ -113,7 +381,7 @@ class HistoryTests: XCTestCase {
     Storage.shared.context.insert(secondItem)
     secondItem.application = "WitsCopy.app"
     secondItem.contents = secondContents
-    secondItem.title = secondItem.generateTitle()
+    secondItem.restoreAutomaticTitle()
     let second = history.add(secondItem)
 
     XCTAssertEqual(history.items, [second])
@@ -541,6 +809,152 @@ class HistoryTests: XCTestCase {
     XCTAssertNotNil(AppState.shared.storageError)
   }
 
+  func testCreateTextItemPersistsIndependentPlainRowsBeforePublishing() throws {
+    let body = "\t  same body\n\n"
+    let original = historyItem(body)
+    let rich = try XCTUnwrap(NSAttributedString(string: body).rtf(
+      from: NSRange(location: 0, length: (body as NSString).length), documentAttributes: [:]
+    ))
+    original.contents.append(HistoryItemContent(type: NSPasteboard.PasteboardType.rtf.rawValue, value: rich))
+    original.pin = "p"
+    original.tags = ["old-tag"]
+    original.setCustomTitle("old title")
+    original.numberOfCopies = 9
+    let oldRow = history.add(original)
+    try Storage.shared.context.save()
+    let oldContents = original.contents.map(\.persistentModelID)
+    let oldBytes = original.contents.map(\.value)
+    var saveCalls = 0
+    Storage.shared.saveImplementation = {
+      saveCalls += 1
+      XCTAssertEqual(self.history.all.count, saveCalls, "no new decorator is published before its save")
+      try Storage.shared.context.save()
+    }
+    defer { Storage.shared.saveImplementation = nil }
+
+    let named = try XCTUnwrap(history.createTextItem(title: " new title ", text: body, tag: " current-tag "))
+    let automatic = try XCTUnwrap(history.createTextItem(title: "", text: body, tag: nil))
+    XCTAssertEqual(saveCalls, 2)
+    XCTAssertEqual(history.all.count, 3)
+    XCTAssertFalse(oldRow.isRemoved)
+    XCTAssertEqual(original.pin, "p")
+    XCTAssertEqual(original.tags, ["old-tag"])
+    XCTAssertEqual(original.title, "old title")
+    XCTAssertEqual(original.numberOfCopies, 9)
+    XCTAssertEqual(original.contents.map(\.persistentModelID), oldContents)
+    XCTAssertEqual(original.contents.map(\.value), oldBytes)
+    for row in [named, automatic] {
+      XCTAssertNotEqual(row.id, oldRow.id)
+      XCTAssertNil(row.item.pin)
+      XCTAssertEqual(row.item.numberOfCopies, 1)
+      XCTAssertEqual(row.item.application, LabRuntime.snippetSource)
+      XCTAssertEqual(row.item.contents.map(\.type), [NSPasteboard.PasteboardType.string.rawValue])
+      XCTAssertEqual(row.item.contents.first?.value, Data(body.utf8))
+      XCTAssertTrue(row.item.contents.allSatisfy { $0.item === row.item })
+    }
+    XCTAssertEqual(named.item.title, "new title")
+    XCTAssertEqual(named.item.titleIsCustom, true)
+    XCTAssertEqual(named.item.tags, ["current-tag"])
+    XCTAssertEqual(automatic.item.title, automatic.item.generateTitle())
+    XCTAssertEqual(automatic.item.titleIsCustom, false)
+    XCTAssertEqual(automatic.item.tags, [])
+    let stored = try ModelContext(Storage.shared.container).fetch(FetchDescriptor<HistoryItem>())
+    XCTAssertEqual(Set(stored.map(\.persistentModelID)), Set(history.all.map(\.item.persistentModelID)))
+    XCTAssertEqual(storedContentCount(), oldContents.count + 2)
+  }
+
+  func testCreateTextItemFailureKeepsExistingRowsDraftSelectionAndPendingEdits() throws {
+    let original = historyItem("same body")
+    original.pin = "p"
+    original.tags = ["keep"]
+    original.setCustomTitle("old title")
+    let row = history.add(original)
+    let other = history.add(historyItem("unrelated body"))
+    try Storage.shared.context.save()
+    other.item.application = "com.example.pending-edit"
+    let app = AppState.shared
+    let draft = OriginalTextDraft(title: "unsaved title", body: "unsaved body")
+    app.retainTextDraft(draft, itemID: row.id)
+    history.tagFilter = "keep"
+    history.typeFilter = .text
+    history.searchQuery = "same"
+    history.refreshVisibleItems()
+    app.navigator.select(item: row)
+    let allIDs = history.all.map(\.id)
+    let visibleIDs = history.items.map(\.id)
+    let selection = app.navigator.selection.items.map(\.id)
+    let bytes = row.item.contents.map(\.value)
+    let contentCount = storedContentCount()
+    var saveCalls = 0
+    Storage.shared.saveImplementation = {
+      saveCalls += 1
+      throw CocoaError(.fileWriteUnknown)
+    }
+    defer {
+      Storage.shared.saveImplementation = nil
+      history.searchQuery = ""
+      history.tagFilter = nil
+      history.typeFilter = nil
+      app.discardTextDraft(itemID: row.id)
+    }
+
+    XCTAssertNil(history.createTextItem(title: "new title", text: "same body", tag: "new-tag"))
+    XCTAssertEqual(saveCalls, 1, "failure cleanup must not retry or hide the failed save")
+    XCTAssertEqual(history.all.map(\.id), allIDs)
+    XCTAssertEqual(history.items.map(\.id), visibleIDs)
+    XCTAssertEqual(app.navigator.selection.items.map(\.id), selection)
+    XCTAssertEqual(app.navigator.leadHistoryItem?.id, row.id)
+    XCTAssertEqual(app.textDraft(for: row.id), draft)
+    XCTAssertFalse(row.isRemoved)
+    XCTAssertEqual(row.item.pin, "p")
+    XCTAssertEqual(row.item.tags, ["keep"])
+    XCTAssertEqual(row.item.title, "old title")
+    XCTAssertEqual(row.item.contents.map(\.value), bytes)
+    XCTAssertEqual(other.item.application, "com.example.pending-edit", "never roll back unrelated pending changes")
+    XCTAssertEqual(history.tagFilter, "keep")
+    XCTAssertEqual(history.typeFilter, .text)
+    XCTAssertEqual(history.searchQuery, "same")
+    XCTAssertEqual(app.storageError, NSLocalizedString("save_failed", comment: ""))
+    try Storage.shared.context.save()
+    let context = ModelContext(Storage.shared.container)
+    XCTAssertEqual(try context.fetchCount(FetchDescriptor<HistoryItem>()), allIDs.count)
+    XCTAssertEqual(try context.fetchCount(FetchDescriptor<HistoryItemContent>()), contentCount)
+  }
+
+  func testCreateTextItemLeadsOrdinaryRowsWithoutChangingCopyCountSort() async throws {
+    Defaults[.sortBy] = .numberOfCopies
+    let popular = historyItem("popular")
+    popular.numberOfCopies = 20
+    let popularRow = history.add(popular)
+    let pin = historyItem("pin")
+    pin.pin = "p"
+    let pinned = history.add(pin)
+    defer {
+      history.searchQuery = ""
+      history.typeFilter = nil
+      history.tagFilter = nil
+    }
+    for position in [PinsPosition.top, .bottom] {
+      Defaults[.pinTo] = position
+      try await history.load()
+      history.typeFilter = .image
+      history.tagFilter = "unrelated"
+      history.searchQuery = "does not match"
+      let created = try XCTUnwrap(history.createTextItem(title: "", text: "fresh \(position.rawValue)", tag: "current"))
+      XCTAssertEqual(Defaults[.sortBy], .numberOfCopies)
+      XCTAssertEqual(created.item.numberOfCopies, 1)
+      XCTAssertEqual(popular.numberOfCopies, 20)
+      XCTAssertEqual(history.all.first(where: \.isUnpinned)?.id, created.id)
+      XCTAssertEqual(history.unpinnedItems.first?.id, created.id)
+      XCTAssertEqual(history.tagFilter, "current")
+      XCTAssertNil(history.typeFilter)
+      XCTAssertEqual(history.searchQuery, "")
+      XCTAssertEqual(AppState.shared.navigator.leadHistoryItem?.id, created.id)
+      XCTAssertEqual(history.all.first?.id, position == .top ? pinned.id : created.id)
+      XCTAssertTrue(history.all.contains(popularRow))
+    }
+  }
+
   func testDuplicateMergeSavesExplicitly() throws {
     let first = history.add(historyItem("dup-body"))
     first.item.tags = ["keep"]
@@ -641,7 +1055,7 @@ class HistoryTests: XCTestCase {
     Storage.shared.context.insert(item)
     item.contents = contents
     item.numberOfCopies = 1
-    item.title = item.generateTitle()
+    item.restoreAutomaticTitle()
 
     return item
   }
@@ -1445,14 +1859,14 @@ final class WorkspacePolicyTests: XCTestCase {
   func testEmptyPinStringStaysPinnedAndDedupCopiesIt() {
     let item = historyItem("pin-body")
     item.pin = ""
-    item.title = "kept-title"
+    item.setCustomTitle("kept-title")
     let original = history.add(item)
     XCTAssertEqual(original.item.pin, "")
     XCTAssertTrue(original.isPinned, "empty shortcut is still a pin")
 
     let incoming = historyItem("pin-body")
     incoming.pin = nil
-    incoming.title = "incoming"
+    incoming.setCustomTitle("incoming")
     let survivor = history.add(incoming)
     XCTAssertEqual(survivor.item.pin, "")
     XCTAssertEqual(survivor.item.title, "kept-title")
@@ -1531,6 +1945,45 @@ final class WorkspacePolicyTests: XCTestCase {
     XCTAssertTrue(one.item.tags.isEmpty)
     XCTAssertEqual(one.item.text, "keep-body")
     XCTAssertEqual(two.item.text, "other-body")
+  }
+
+  func testCustomFileTitleIsVisibleAndPathTooltipIsUnchanged() throws {
+    let url = URL(fileURLWithPath: "/tmp/lab/report.pdf")
+    let row = history.add(fileItem(url))
+    let bytes = row.item.contents.map(\.value)
+    XCTAssertTrue(history.renameTitle(row, to: "季度报告"))
+    let custom = WorkspaceItemLabel.make(
+      storedTitle: row.item.title, filePaths: row.item.fileURLs.map(\.path), titleIsCustom: row.item.isTitleCustom
+    )
+    XCTAssertEqual(custom.rowTitle, "季度报告")
+    XCTAssertEqual(custom.tooltip, url.path)
+    XCTAssertTrue(custom.isFile)
+    XCTAssertEqual(row.item.contents.map(\.value), bytes)
+    let literal = WorkspaceItemLabel.make(storedTitle: "file://my manual name", filePaths: [], titleIsCustom: true)
+    XCTAssertEqual(literal.rowTitle, "file://my manual name")
+    XCTAssertNil(literal.tooltip)
+    XCTAssertFalse(literal.isFile)
+    XCTAssertTrue(history.restoreAutomaticTitle(row))
+    let automatic = WorkspaceItemLabel.make(
+      storedTitle: row.item.title, filePaths: row.item.fileURLs.map(\.path), titleIsCustom: row.item.isTitleCustom
+    )
+    XCTAssertEqual(automatic.rowTitle, "report.pdf")
+    XCTAssertEqual(automatic.tooltip, url.path)
+  }
+
+  func testTitleAndTagEditorsAreMutuallyExclusiveAndDeleteClosesTitleEditor() {
+    let row = history.add(historyItem("editor body"))
+    let app = AppState.shared
+    app.beginTitleEdit(for: row)
+    XCTAssertEqual(app.titleEditorItem?.id, row.id)
+    app.beginTagEdit(for: row)
+    XCTAssertNil(app.titleEditorItem)
+    XCTAssertEqual(app.tagEditorItem?.id, row.id)
+    app.beginTitleEdit(for: row)
+    XCTAssertNil(app.tagEditorItem)
+    XCTAssertEqual(app.titleEditorItem?.id, row.id)
+    history.delete(row)
+    XCTAssertNil(app.titleEditorItem)
   }
 
   func testFileRowLabelDoesNotRewriteCopyData() {
@@ -2302,7 +2755,7 @@ final class WorkspacePolicyTests: XCTestCase {
     Storage.shared.context.insert(item)
     item.contents = contents
     item.numberOfCopies = 1
-    item.title = item.generateTitle()
+    item.restoreAutomaticTitle()
     return item
   }
 
@@ -2908,7 +3361,7 @@ final class PreviewViewportLayoutTests: XCTestCase {
         value: Data("pin body".utf8)
       )
     ])
-    item.title = "合成标题原"
+    XCTAssertTrue(item.setCustomTitle("合成标题原"))
     item.pin = "s"
     Storage.shared.context.insert(item)
     let decorator = history.add(item)

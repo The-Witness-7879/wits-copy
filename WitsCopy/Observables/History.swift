@@ -93,9 +93,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
     Task {
       for await _ in Defaults.updates(.showSpecialSymbols, initial: false) {
-        for item in items {
-          await updateTitle(item: item, title: item.item.generateTitle())
-        }
+        await refreshAutomaticTitles()
       }
     }
 
@@ -112,6 +110,19 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
   func load() async throws {
     let descriptor = FetchDescriptor<HistoryItem>()
     let results = try Storage.shared.context.fetch(descriptor)
+    let legacy = results.filter { $0.titleIsCustom == nil }
+    if !legacy.isEmpty {
+      legacy.forEach { $0.migrateLegacyTitleSource() }
+      do {
+        try Storage.shared.save()
+        clearSaveFailure()
+      } catch {
+        // A failed migration is still pending. Do not publish decorators as if it persisted.
+        legacy.forEach { $0.titleIsCustom = nil }
+        reportSaveFailure(error)
+        throw error
+      }
+    }
     let sorted = sorter.sort(results)
     var kept: [PersistentIdentifier: HistoryItemDecorator] = [:]
     for decorator in all where !decorator.isRemoved {
@@ -180,7 +191,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       item.numberOfCopies += existingHistoryItem.numberOfCopies
       item.pin = existingHistoryItem.pin
       item.tags = HistoryItem.unionTags(existingHistoryItem.tags, item.tags)
-      item.title = existingHistoryItem.title
+      item.inheritTitle(from: existingHistoryItem)
       if !item.fromWitsCopy {
         item.application = existingHistoryItem.application
       }
@@ -343,6 +354,9 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
 
   @MainActor
   private func cleanup(_ item: HistoryItemDecorator) {
+    if AppState.shared.titleEditorItem?.id == item.id {
+      AppState.shared.clearTitleEditor()
+    }
     item.prepareForRemoval()
     if AppState.shared.tagEditorItem?.id == item.id {
       AppState.shared.clearTagEditor()
@@ -709,8 +723,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
         value: Data(text.utf8)
       )
     ])
-    let alias = title.trimmingCharacters(in: .whitespacesAndNewlines)
-    item.title = alias.isEmpty ? item.generateTitle() : alias
+    item.applyTitleEdit(title)
     item.pin = pin
     item.application = LabRuntime.snippetSource
     return item
@@ -733,6 +746,43 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       return nil
     }
     clearSaveFailure()
+    return decorator
+  }
+
+  /// User-authored text is a new record, not a clipboard capture to deduplicate.
+  /// Publish at the front of ordinary rows only after saving; later loads still honor the user's sorter.
+  @discardableResult
+  @MainActor
+  func createTextItem(title: String, text: String, tag: String?) -> HistoryItemDecorator? {
+    guard let item = Self.makeSnippetItem(title: title, text: text, pin: "") else { return nil }
+    item.pin = nil
+    item.tags = tag.flatMap(HistoryItem.normalizedTag).map { [$0] } ?? []
+    do {
+      // Unlike the clipboard-capture add path, creation must insert on macOS 14 too.
+      try insertIntoStorage(item)
+    } catch {
+      // Undo only this unsaved insertion, never unrelated edits or an existing same-body item.
+      let contents = item.contents
+      Storage.shared.context.delete(item)
+      contents.forEach { Storage.shared.context.delete($0) }
+      Storage.shared.context.processPendingChanges()
+      reportSaveFailure(error)
+      return nil
+    }
+
+    clearSaveFailure()
+    let decorator = HistoryItemDecorator(item)
+    let index = all.firstIndex(where: \.isUnpinned) ?? (Defaults[.pinTo] == .top ? all.count : 0)
+    all.insert(decorator, at: index)
+
+    // Reveal the saved row even if creation began under a non-text or search filter.
+    AppState.shared.workspaceSection = .all
+    searchQuery = ""
+    throttler.cancel()
+    typeFilter = nil
+    tagFilter = item.tags.first
+    applySearch(highlightFirst: false)
+    AppState.shared.navigator.select(item: decorator)
     return decorator
   }
 
@@ -770,7 +820,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
           value: Data(text.utf8)
         )
       ])
-      item.title = text
+      item.restoreAutomaticTitle()
       item.pin = pin
       item.tags = tags
       item.application = application
@@ -781,6 +831,17 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     textItem("Standup notes for Monday", application: "com.apple.TextEdit")
     textItem("#release-2.7 checklist", application: "com.apple.TextEdit")
     textItem("Wi-Fi lab-guest", pin: "w", tags: ["net"], application: "com.apple.finder")
+    if CommandLine.arguments.contains("--lab-title-no-excerpt-smoke") {
+      let text = NSAttributedString(string: "合成无摘要标题")
+      if let rtf = text.rtf(from: NSRange(location: 0, length: text.length), documentAttributes: [:]) {
+        let item = HistoryItem(contents: [
+          HistoryItemContent(type: NSPasteboard.PasteboardType.rtf.rawValue, value: rtf)
+        ])
+        item.restoreAutomaticTitle()
+        item.application = LabRuntime.snippetSource
+        _ = add(item)
+      }
+    }
     if LabRuntime.isLinkSmoke {
       textItem("https://example.com/wits-copy-smoke", application: "com.apple.Safari")
     }
@@ -806,7 +867,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       HistoryItemContent(type: NSPasteboard.PasteboardType.rtf.rawValue, value: rtf),
       HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: Data("合成粗体保留".utf8))
     ])
-    item.title = "合成富文本"
+    item.setCustomTitle("合成富文本")
     item.application = LabRuntime.snippetSource
     _ = add(item)
   }
@@ -817,7 +878,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       let item = HistoryItem(contents: [
         HistoryItemContent(type: type, value: data)
       ])
-      item.title = title
+      item.setCustomTitle(title)
       item.application = "com.apple.Preview"
       _ = add(item)
     }
@@ -833,7 +894,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     let item = HistoryItem(contents: [
       HistoryItemContent(type: NSPasteboard.PasteboardType.png.rawValue, value: png)
     ])
-    item.title = "合成色块"
+    item.setCustomTitle("合成色块")
     item.application = "com.apple.Preview"
     _ = add(item)
     if LabRuntime.isImageSmoke {
@@ -849,7 +910,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
           HistoryItemContent(type: NSPasteboard.PasteboardType.fileURL.rawValue, value: url.dataRepresentation),
           HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue, value: Data("synthetic.gif".utf8))
         ])
-        item.title = "合成动图"
+        item.setCustomTitle("合成动图")
         item.application = "com.apple.finder"
         _ = add(item)
       }
@@ -859,7 +920,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
       let raw = HistoryItem(contents: [
         HistoryItemContent(type: NSPasteboard.PasteboardType.png.rawValue, value: data)
       ])
-      raw.title = "合成识别图片"
+      raw.setCustomTitle("合成识别图片")
       raw.application = "com.apple.Preview"
       _ = add(raw)
     }
@@ -893,7 +954,7 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
           value: Data(name.utf8)
         )
       ])
-      item.title = name
+      item.restoreAutomaticTitle()
       item.application = "com.apple.finder"
       _ = add(item)
     }
@@ -939,10 +1000,62 @@ class History: ItemsContainer { // swiftlint:disable:this type_body_length
     updateUnpinnedShortcuts()
   }
 
+  /// Refresh the complete pool, not just search-visible rows. Persist as one change.
+  @discardableResult
   @MainActor
-  private func updateTitle(item: HistoryItemDecorator, title: String) {
-    item.title = title
-    item.item.title = title
+  func refreshAutomaticTitles() -> Bool {
+    let previous = all.filter { !$0.isRemoved && !$0.item.isTitleCustom }.map {
+      ($0, $0.item.title, $0.item.titleIsCustom, $0.attributedTitle)
+    }
+    guard !previous.isEmpty else { return true }
+    for (row, _, _, _) in previous {
+      row.item.syncAutomaticTitle()
+      row.title = row.item.title
+      row.attributedTitle = nil
+    }
+    do {
+      try Storage.shared.save()
+    } catch {
+      for (row, title, source, highlight) in previous {
+        row.item.title = title
+        row.item.titleIsCustom = source
+        row.title = title
+        row.attributedTitle = highlight
+      }
+      reportSaveFailure(error)
+      return false
+    }
+    clearSaveFailure()
+    applySearch(highlightFirst: false)
+    return true
+  }
+
+  @discardableResult
+  @MainActor
+  func renameTitle(_ item: HistoryItemDecorator, to name: String) -> Bool {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return false }
+    return saveTitle(item, name: trimmed)
+  }
+
+  @discardableResult
+  @MainActor
+  func restoreAutomaticTitle(_ item: HistoryItemDecorator) -> Bool {
+    saveTitle(item, name: "")
+  }
+
+  @MainActor
+  private func saveTitle(_ row: HistoryItemDecorator, name: String) -> Bool {
+    guard !row.isRemoved, all.contains(where: { $0.id == row.id }) else { return false }
+    do {
+      try row.saveTitle(name)
+    } catch {
+      reportSaveFailure(error)
+      return false
+    }
+    clearSaveFailure()
+    applySearch(highlightFirst: false)
+    return true
   }
 
   private func updateUnpinnedShortcuts() {

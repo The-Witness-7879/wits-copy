@@ -42,6 +42,63 @@ class HistoryItemDecoratorTests: XCTestCase {
     XCTAssertNil(itemDecorator.thumbnailImage)
   }
 
+  func testSnippetSourceUsesSystemSymbolInsteadOfApplicationImage() {
+    let item = HistoryItem(contents: [])
+    item.application = LabRuntime.snippetSource
+    let decorator = HistoryItemDecorator(item)
+
+    guard case .systemSymbol(let name) = decorator.applicationImage else {
+      return XCTFail("snippets must bypass bundle icon caching and raw NSImage rendering")
+    }
+    XCTAssertEqual(name, "note.text")
+    XCTAssertEqual(item.application, LabRuntime.snippetSource, "source metadata must remain unchanged")
+  }
+
+  func testApplicationSourceKeepsBundleIconCache() {
+    let item = HistoryItem(contents: [])
+    item.application = "com.apple.finder"
+    let decorator = HistoryItemDecorator(item)
+
+    guard case .application(let image) = decorator.applicationImage else {
+      return XCTFail("real applications must retain their bundle icon path")
+    }
+    XCTAssertEqual(image.bundleIdentifier, "com.apple.finder")
+    XCTAssertTrue(image === ApplicationImageCache.shared.getImage(item: item))
+    let secondDecorator = HistoryItemDecorator(item)
+    guard case .application(let cachedImage) = secondDecorator.applicationImage else {
+      return XCTFail("repeat decoration must retain the application branch")
+    }
+    XCTAssertTrue(image === cachedImage, "decoration must reuse the cached application image")
+  }
+
+  func testUniversalClipboardSourceKeepsApplicationMapping() {
+    for application in [nil, "com.apple.finder"] as [String?] {
+      let item = HistoryItem(contents: [
+        HistoryItemContent(type: NSPasteboard.PasteboardType.universalClipboard.rawValue, value: Data())
+      ])
+      item.application = application
+      let decorator = HistoryItemDecorator(item)
+
+      guard case .application(let image) = decorator.applicationImage else {
+        return XCTFail("universal clipboard must retain its real application mapping")
+      }
+      XCTAssertEqual(image.bundleIdentifier, "com.apple.finder.Open-iCloudDrive")
+      XCTAssertTrue(image === ApplicationImageCache.shared.getImage(item: item))
+    }
+  }
+
+  func testMissingApplicationSourceKeepsSharedFallback() {
+    let item = HistoryItem(contents: [])
+    let decorator = HistoryItemDecorator(item)
+
+    guard case .application(let image) = decorator.applicationImage else {
+      return XCTFail("missing applications must retain the application fallback path")
+    }
+    XCTAssertNil(image.bundleIdentifier)
+    let secondItem = HistoryItem(contents: [])
+    XCTAssertTrue(image === ApplicationImageCache.shared.getImage(item: secondItem))
+  }
+
   func testRowExcerptUsesBoundedPlainTextWithoutConvertingRichPayloads() {
     let plainItem = HistoryItem(contents: [
       HistoryItemContent(type: NSPasteboard.PasteboardType.string.rawValue,

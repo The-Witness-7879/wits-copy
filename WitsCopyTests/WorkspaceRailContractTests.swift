@@ -23,6 +23,81 @@ final class WorkspaceRailContractTests: XCTestCase {
     XCTAssertGreaterThanOrEqual(WorkspaceRailMetrics.hit, 35)
   }
 
+  func testCategoryMenusShareTheFullFamilyWidth() {
+    let family = WorkspaceCategoryMenu.minimumWidth()
+    let single = WorkspaceCategoryMenu.minimumWidth(titleKeys: ["create_snippet"])
+    XCTAssertGreaterThan(family, single)
+    let all = WorkspaceCategoryMenu.menu(items: [
+      RailContextItem(titleKey: "create_snippet", action: {})
+    ]).0
+    let tag = WorkspaceCategoryMenu.menu(items: [
+      RailContextItem(titleKey: "create_snippet", action: {}),
+      RailContextItem(titleKey: "tag_rename_menu", separatorBefore: true, action: {}),
+      RailContextItem(titleKey: "tag_merge_menu", action: {}),
+      RailContextItem(titleKey: "tag_delete_menu", separatorBefore: true, action: {})
+    ]).0
+    XCTAssertEqual(all.minimumWidth, family)
+    XCTAssertEqual(tag.minimumWidth, family)
+    XCTAssertEqual(all.minimumWidth, tag.minimumWidth)
+  }
+
+  func testDraggingATagInsertsItAtTheDropSlot() {
+    let stored = ["addr", "net", "work"]
+    XCTAssertEqual(
+      WorkspaceTagDirectory.placing("work", before: "addr", stored: stored, itemTags: stored),
+      ["work", "addr", "net"]
+    )
+    XCTAssertEqual(
+      WorkspaceTagDirectory.placing("addr", before: nil, atEnd: true, stored: stored, itemTags: stored),
+      ["net", "work", "addr"]
+    )
+    let pitch: CGFloat = WorkspaceRailMetrics.hit + WorkspaceRailFlow.spacing
+    XCTAssertEqual(
+      WorkspaceTagReorder.slot(
+        moving: "addr",
+        translation: 80,
+        order: ["addr", "net", "work"],
+        pitch: pitch
+      ),
+      WorkspaceTagReorder.Slot(before: nil, atEnd: true)
+    )
+    XCTAssertEqual(
+      WorkspaceTagReorder.slot(
+        moving: "work",
+        translation: -80,
+        order: ["addr", "net", "work"],
+        pitch: pitch
+      ),
+      WorkspaceTagReorder.Slot(before: "addr", atEnd: false)
+    )
+    XCTAssertNil(
+      WorkspaceTagReorder.slot(
+        moving: "net",
+        translation: 8,
+        order: ["addr", "net", "work"],
+        pitch: pitch
+      )
+    )
+    XCTAssertEqual(
+      WorkspaceTagReorder.shifts(
+        moving: "work",
+        slot: WorkspaceTagReorder.Slot(before: "addr", atEnd: false),
+        order: ["addr", "net", "work"],
+        pitch: pitch
+      ),
+      ["addr": pitch, "net": pitch]
+    )
+    XCTAssertEqual(
+      WorkspaceTagReorder.shifts(
+        moving: "addr",
+        slot: WorkspaceTagReorder.Slot(before: nil, atEnd: true),
+        order: ["addr", "net", "work"],
+        pitch: pitch
+      ),
+      ["net": -pitch, "work": -pitch]
+    )
+  }
+
   func testSelectionAndDropFeedbackDoNotReplaceEachOther() {
     XCTAssertEqual(WorkspaceRailFeedback.accessibilityValue(selected: false, dropTarget: false), "")
     XCTAssertEqual(WorkspaceRailFeedback.accessibilityValue(selected: true, dropTarget: false), "selected")

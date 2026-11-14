@@ -31,7 +31,7 @@ enum SelectionAppearance {
 struct ListItemView<Title: View, ID: Hashable>: View {
   var id: ID
   var selectionId: UUID
-  var appIcon: ApplicationImage?
+  var appIcon: SourceIcon?
   var image: NSImage?
   var showsTitleWithImage: Bool = false
   var accessoryImage: NSImage?
@@ -79,6 +79,11 @@ struct ListItemView<Title: View, ID: Hashable>: View {
       return Popup.itemHeight
     }
     return HistoryRowMetrics.contentHeight
+  }
+
+  private var historySourceIconSize: CGSize {
+    let side: CGFloat = compactRows ? 15 : 30
+    return CGSize(width: side, height: side)
   }
 
   var body: some View {
@@ -189,9 +194,9 @@ struct ListItemView<Title: View, ID: Hashable>: View {
       if showIcons {
         VStack(alignment: .center, spacing: 5) {
           if showIcons, let appIcon {
-            AppImageView(appImage: appIcon, size: NSSize(width: 30, height: 30))
+            AppImageView(appImage: appIcon, size: historySourceIconSize)
           } else if showIcons {
-            Color.clear.frame(width: 30, height: 30)
+            Color.clear.frame(width: historySourceIconSize.width, height: historySourceIconSize.height)
           }
           Spacer(minLength: 0)
         }
@@ -290,7 +295,7 @@ struct ListItemView<Title: View, ID: Hashable>: View {
                   }
                   ListItemTitleView(
                     attributedTitle: attributedTitle,
-                    lineLimit: compactRows || showsHistoryExcerpt ? 1 : 2,
+                    lineLimit: 1,
                     title: title
                   )
                 }

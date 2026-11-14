@@ -190,6 +190,122 @@ class GlassTextField: NSTextField {
   override var intrinsicContentSize: NSSize {
     NSSize(width: super.intrinsicContentSize.width, height: GlassField.height)
   }
+
+  static func owns(_ responder: NSResponder?) -> Bool {
+    if responder is GlassTextField { return true }
+    if let editor = responder as? NSTextView, editor.delegate is GlassTextField { return true }
+    return false
+  }
+}
+
+/// A real AppKit button fills its allocated width, including its bezel and hit area.
+/// Use the same control for AppKit forms and SwiftUI popover forms.
+struct FormActionButton: NSViewRepresentable {
+  var titleKey: String
+  var helpKey: String
+  var identifier: String
+  var isPrimary = false
+  var isEnabled = true
+  var action: () -> Void
+
+  final class Coordinator: NSObject {
+    var action: () -> Void
+    init(action: @escaping () -> Void) { self.action = action }
+    @objc func invoke() { action() }
+  }
+
+  func makeCoordinator() -> Coordinator { Coordinator(action: action) }
+
+  static func makeNative(
+    title: String, help: String, identifier: String, target: AnyObject?, action: Selector
+  ) -> NSButton {
+    let button = NSButton(title: title, target: target, action: action)
+    button.translatesAutoresizingMaskIntoConstraints = false
+    button.bezelStyle = .rounded
+    button.font = .systemFont(ofSize: 13)
+    button.toolTip = help
+    button.setAccessibilityLabel(title)
+    button.setAccessibilityIdentifier(identifier)
+    return button
+  }
+
+  func makeNSView(context: Context) -> NSButton {
+    let button = Self.makeNative(
+      title: NSLocalizedString(titleKey, comment: ""),
+      help: NSLocalizedString(helpKey, comment: ""),
+      identifier: identifier,
+      target: context.coordinator,
+      action: #selector(Coordinator.invoke)
+    )
+    button.keyEquivalent = Self.keyEquivalent(isPrimary: isPrimary, isEnabled: isEnabled)
+    button.isEnabled = isEnabled
+    return button
+  }
+
+  func updateNSView(_ button: NSButton, context: Context) {
+    context.coordinator.action = action
+    button.isEnabled = isEnabled
+    // A disabled primary keeps "\r" only as a default button that does not consume the key.
+    // The panel then treats Return as select-and-close. Drop it until the name is legal.
+    button.keyEquivalent = Self.keyEquivalent(isPrimary: isPrimary, isEnabled: isEnabled)
+  }
+
+  private static func keyEquivalent(isPrimary: Bool, isEnabled: Bool) -> String {
+    if isPrimary { return isEnabled ? "\r" : "" }
+    return "\u{1b}"
+  }
+
+  func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSButton, context: Context) -> CGSize? {
+    CGSize(width: proposal.width ?? nsView.fittingSize.width, height: WorkspaceTagCreatePlacement.buttonHeight)
+  }
+}
+
+struct FormActions: View {
+  var primaryTitleKey: String
+  var primaryHelpKey: String
+  var cancelIdentifier: String
+  var primaryIdentifier: String
+  var primaryEnabled = true
+  var onCancel: () -> Void
+  var onConfirm: () -> Void
+
+  var body: some View {
+    HStack(spacing: WorkspaceTagCreatePlacement.buttonGap) {
+      FormActionButton(
+        titleKey: "edit_cancel", helpKey: "edit_cancel_help", identifier: cancelIdentifier, action: onCancel
+      )
+      .frame(maxWidth: .infinity)
+      FormActionButton(
+        titleKey: primaryTitleKey, helpKey: primaryHelpKey, identifier: primaryIdentifier,
+        isPrimary: true, isEnabled: primaryEnabled, action: onConfirm
+      )
+      .frame(maxWidth: .infinity)
+    }
+    .frame(height: WorkspaceTagCreatePlacement.buttonHeight)
+  }
+}
+
+/// Measure with the cell that actually draws the message, not NSString's different line metrics.
+@MainActor
+enum FormValidation {
+  static func configure(_ label: NSTextField) {
+    label.font = .systemFont(ofSize: 11)
+    label.textColor = .systemRed
+    label.usesSingleLineMode = false
+    label.lineBreakMode = .byWordWrapping
+    label.maximumNumberOfLines = 0
+    label.cell?.wraps = true
+    label.cell?.isScrollable = false
+    label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+  }
+
+  static func height(of label: NSTextField, width: CGFloat) -> CGFloat {
+    guard !label.stringValue.isEmpty, let cell = label.cell else { return 0 }
+    let size = cell.cellSize(forBounds: NSRect(
+      x: 0, y: 0, width: width, height: .greatestFiniteMagnitude
+    ))
+    return max(WorkspaceTagCreatePlacement.errorHeight, ceil(size.height))
+  }
 }
 
 #Preview {

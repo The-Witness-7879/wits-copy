@@ -6,16 +6,9 @@ class ApplicationImageCache {
   private let universalClipboardIdentifier: String =
   "com.apple.finder.Open-iCloudDrive"
   private let fallback = ApplicationImage(bundleIdentifier: nil)
-  private let snippetIcon = ApplicationImage(
-    bundleIdentifier: LabRuntime.snippetSource,
-    image: NSImage(systemSymbolName: "note.text", accessibilityDescription: nil)
-  )
   private var cache: [String: ApplicationImage] = [:]
 
   func getImage(item: HistoryItem) -> ApplicationImage {
-    if item.application == LabRuntime.snippetSource {
-      return snippetIcon
-    }
     guard let bundleIdentifier = bundleIdentifier(for: item) else {
       return fallback
     }

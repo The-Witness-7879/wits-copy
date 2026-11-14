@@ -154,7 +154,7 @@ final class PinContinuityTests: XCTestCase {
     AppState.shared.navigator.select(item: keep)
     let other = textItem("other-body")
     other.pin = "o"
-    other.title = "other-alias"
+    XCTAssertTrue(other.setCustomTitle("other-alias"))
     let original = history.add(other)
     let survivor = history.add(textItem("other-body"))
     drain(0.05)
@@ -350,7 +350,7 @@ final class PinContinuityTests: XCTestCase {
   private func mountPinned(pin: String, image: Bool, alias: String) throws -> Mounted {
     let item = image ? imageItem(alias) : textItem("body-\(alias)")
     item.pin = pin
-    item.title = alias
+    XCTAssertTrue(item.setCustomTitle(alias))
     let original = history.add(item)
     original.title = alias
     let root = PinEditorHost(item: original)

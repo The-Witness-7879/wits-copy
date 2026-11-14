@@ -1054,11 +1054,14 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKey
   }
 
   private func browsingEscapeDelivery(keyCode: UInt16) -> PanelBrowsingKeys.Delivery {
-    let responder = firstResponder
+    let titleEditorActive = AppState.shared.titleEditorItem != nil
+    // The title popover has its own field editor; the panel can retain an old responder.
+    let responder = titleEditorActive ? NSApp.keyWindow?.firstResponder : firstResponder
     let marked = (responder as? NSTextInputClient)?.hasMarkedText() == true
-    let editorOwns = PanelKeyPolicy.defersToLocalEditor(responder)
+    let editorOwns = !titleEditorActive && PanelKeyPolicy.defersToLocalEditor(responder)
     let context = AppState.shared.focusContext
     let session = editorOwns
+      || titleEditorActive
       || AppState.shared.tagEditorItem != nil
       || AppState.shared.pinRecordingItemID != nil
       || AppState.shared.previewShortcutItemID != nil
@@ -1072,7 +1075,8 @@ class FloatingPanel<Content: View>: NSPanel, NSWindowDelegate, LocalRecordingKey
       editorOwnsEscape: editorOwns,
       markedText: marked,
       sessionActive: session && !editorOwns && !marked,
-      cancelArmed: escapeCancelArmed
+      // Cancelling clears titleEditorItem synchronously; a reopened editor is a fresh session.
+      cancelArmed: escapeCancelArmed && !titleEditorActive
     )
   }
 

@@ -514,7 +514,8 @@ final class ProductButtonCopyTests: XCTestCase {
         let span = lines[index..<spanEnd].joined(separator: "\n")
         let roleSpan = lines[index..<roleEnd].joined(separator: "\n")
         let site = "\(rel):\(index + 1): \(line.prefix(90))"
-        let hasCopy = span.contains("iconHelp") || span.contains("help:") || span.contains(".help(") || span.contains("toolTip")
+        let hasCopy = span.contains("iconHelp") || span.contains("help:") || span.contains("helpKey:")
+          || span.contains(".help(") || span.contains("toolTip")
         let roleKind: String? = {
           if roleSpan.contains("role: .destructive") { return "destructive" }
           if roleSpan.contains("role: .cancel") { return "cancel" }
@@ -602,12 +603,13 @@ final class ProductButtonCopyTests: XCTestCase {
       (try? String(contentsOf: url))?.contains("lab-wrap-toggle") == true
     })
     let source = try String(contentsOf: root.appendingPathComponent("WorkspaceManagementView.swift"), encoding: .utf8)
+    let itemForm = try String(contentsOf: root.appendingPathComponent("WorkspaceTagRail.swift"), encoding: .utf8)
     XCTAssertTrue(source.contains("lab-rail-rename-confirm"))
     XCTAssertTrue(source.contains("lab-rail-merge-confirm"))
-    XCTAssertTrue(source.contains("lab-snippet-add"))
+    XCTAssertTrue(itemForm.contains("lab-item-create-confirm"))
     XCTAssertTrue(source.contains("tag_rename_help"))
     XCTAssertTrue(source.contains("tag_merge_help"))
-    XCTAssertTrue(source.contains("snippet_add_help"))
+    XCTAssertTrue(itemForm.contains("tag_directory_create_help"))
     XCTAssertTrue(source.contains("tag_delete_confirm_help"))
     XCTAssertTrue(source.contains("tag_delete_cancel_help"))
     XCTAssertTrue(source.contains("directory_error_dismiss_help"))

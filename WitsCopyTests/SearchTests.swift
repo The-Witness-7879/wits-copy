@@ -332,6 +332,104 @@ class SearchTests: XCTestCase {
     XCTAssertGreaterThan(fuzzyThenFilter, 0)
   }
 
+  @MainActor
+  func testCustomTitleStillSearchesBodyAndTagsWithoutTitleRangesInEveryMode() throws {
+    let model = historyItemWithTitle("quasar-unique-body")
+    XCTAssertTrue(model.setCustomTitle("邮箱"))
+    model.tags = ["nebula-tag"]
+    let row = HistoryItemDecorator(model)
+    let searcher = Search()
+    for mode in Search.Mode.allCases {
+      Defaults[.searchMode] = mode
+      let body = try XCTUnwrap(searcher.search(string: "quasar-unique-body", within: [row]).first, mode.rawValue)
+      XCTAssertEqual(body.object, row)
+      XCTAssertTrue(body.ranges.isEmpty, mode.rawValue)
+      let tag = try XCTUnwrap(searcher.search(string: "nebula-tag", within: [row]).first, mode.rawValue)
+      XCTAssertTrue(tag.ranges.isEmpty, mode.rawValue)
+      let title = try XCTUnwrap(searcher.search(string: "邮箱", within: [row]).first, mode.rawValue)
+      XCTAssertEqual(title.ranges.map { String(row.title[$0]) }, ["邮箱"], mode.rawValue)
+      XCTAssertTrue(searcher.search(string: "quasar-unique-body", within: [row], tag: "other").isEmpty)
+      XCTAssertEqual(searcher.search(string: "quasar-unique-body", within: [row], tag: "NEBULA-TAG").count, 1)
+    }
+  }
+
+  @MainActor
+  func testRegexPatternsFindCustomTitledBodyAndTagsWithoutHighlightingTitle() throws {
+    let model = historyItemWithTitle("quasar-unique-body")
+    model.setCustomTitle("邮箱")
+    model.tags = ["nebula-tag"]
+    let row = HistoryItemDecorator(model)
+    for mode in [Search.Mode.regexp, .mixed] {
+      Defaults[.searchMode] = mode
+      for pattern in ["^quasar-unique-body$", "^nebula-tag$"] {
+        let result = try XCTUnwrap(Search().search(string: pattern, within: [row]).first)
+        XCTAssertTrue(result.ranges.isEmpty)
+      }
+      let result = try XCTUnwrap(Search().search(string: "^邮箱$", within: [row]).first)
+      XCTAssertEqual(result.ranges.map { String(row.title[$0]) }, ["邮箱"])
+    }
+  }
+
+  @MainActor
+  func testFuzzyChoosesBetterBodyScoreWithoutLeakingBodyIndices() throws {
+    Defaults[.searchMode] = .fuzzy
+    let model = historyItemWithTitle("quasar")
+    model.setCustomTitle("prefix quasar")
+    let row = HistoryItemDecorator(model)
+    let result = try XCTUnwrap(Search().search(string: "quasar", within: [row]).first)
+    XCTAssertEqual(result.score, 0)
+    XCTAssertTrue(result.ranges.isEmpty)
+    model.setCustomTitle("quasar")
+    let titleRow = HistoryItemDecorator(model)
+    let tie = try XCTUnwrap(Search().search(string: "quasar", within: [titleRow]).first)
+    XCTAssertEqual(tie.ranges.map { String(titleRow.title[$0]) }, ["quasar"])
+  }
+
+  @MainActor
+  func testSearchRefreshesRichBodyAfterContentSave() throws {
+    Defaults[.searchMode] = .exact
+    let first = NSAttributedString(string: "first body token")
+    let second = NSAttributedString(string: "second body token")
+    let firstRTF = try XCTUnwrap(first.rtf(
+      from: NSRange(location: 0, length: first.length), documentAttributes: [:]
+    ))
+    let secondRTF = try XCTUnwrap(second.rtf(
+      from: NSRange(location: 0, length: second.length), documentAttributes: [:]
+    ))
+    let model = HistoryItem(contents: [
+      HistoryItemContent(type: NSPasteboard.PasteboardType.rtf.rawValue, value: firstRTF)
+    ])
+    model.setCustomTitle("邮箱")
+    let row = HistoryItemDecorator(model)
+    let searcher = Search()
+    XCTAssertEqual(searcher.search(string: "first body token", within: [row]).count, 1)
+    model.contents.first?.value = secondRTF
+    row.noteContentChanged()
+    XCTAssertTrue(searcher.search(string: "first body token", within: [row]).isEmpty)
+    XCTAssertEqual(searcher.search(string: "second body token", within: [row]).count, 1)
+  }
+
+  @MainActor
+  func testSearchUsesFreshBodyForReplacementDecoratorWithoutRevisionBump() {
+    Defaults[.searchMode] = .exact
+    let firstModel = historyItemWithTitle("first body token")
+    firstModel.setCustomTitle("邮箱")
+    let first = HistoryItemDecorator(firstModel)
+    let searcher = Search()
+    XCTAssertEqual(searcher.search(string: "first body token", within: [first]).count, 1)
+
+    // Re-copy creates a new decorator identity, even while both revisions are zero.
+    let replacementModel = historyItemWithTitle("replacement body token")
+    replacementModel.setCustomTitle("邮箱")
+    let replacement = HistoryItemDecorator(replacementModel)
+    XCTAssertNotEqual(first.id, replacement.id)
+    XCTAssertEqual(first.contentRevision, replacement.contentRevision)
+    XCTAssertTrue(searcher.search(string: "first body token", within: [replacement]).isEmpty)
+    let matches = searcher.search(string: "replacement body token", within: [replacement])
+    XCTAssertEqual(matches.map(\.object), [replacement])
+    XCTAssertTrue(matches.allSatisfy { $0.ranges.isEmpty })
+  }
+
   private func search(_ string: String, tag: String? = nil) -> [Search.SearchResult] {
     return Search().search(string: string, within: items, tag: tag)
   }
@@ -371,7 +469,7 @@ class SearchTests: XCTestCase {
     let item = HistoryItem()
     Storage.shared.context.insert(item)
     item.contents = contents
-    item.title = item.generateTitle()
+    item.restoreAutomaticTitle()
 
     return item
   }

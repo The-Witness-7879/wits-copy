@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import WitsCopy
 
@@ -66,6 +67,35 @@ final class WorkspaceTagDirectoryTests: XCTestCase {
       .failure(.invalidName)
     )
     XCTAssertEqual(saves, 0)
+  }
+
+  func testRenameRejectsTheSameIllegalNamesWithoutTouchingHistoryOrTheDirectory() {
+    let writer = MemoryTagDirectoryWriter(names: ["addr"])
+    var historyWrites = 0
+    for illegal in ["测试 1", "   ", String(repeating: "字", count: 33)] {
+      let result = WorkspaceTagDirectoryActions.rename(
+        from: "addr",
+        to: illegal,
+        itemTagsAfter: { ["should-not-be-read"] },
+        renameHistory: {
+          historyWrites += 1
+          return true
+        },
+        rollbackHistory: { _ in
+          historyWrites += 1
+          return true
+        },
+        writer: writer
+      )
+      if case .failure(let error) = result {
+        XCTAssertEqual(error, .invalidName, illegal)
+      } else {
+        XCTFail("illegal rename must fail, not \(String(describing: result))")
+      }
+    }
+    XCTAssertEqual(historyWrites, 0)
+    XCTAssertEqual(writer.saves, 0)
+    XCTAssertEqual(writer.names, ["addr"])
   }
 
   func testCreateTrimsToTheNormalizedSpellingAndRejectsACaseDuplicate() {
@@ -261,7 +291,8 @@ final class WorkspaceTagDirectoryTests: XCTestCase {
     )
     XCTAssertEqual(create.frame.maxY + inset, size.height, accuracy: 0.01)
     XCTAssertEqual(cancel.keyEquivalent, "\u{1b}")
-    XCTAssertEqual(create.keyEquivalent, "\r")
+    XCTAssertEqual(create.keyEquivalent, "")
+    XCTAssertFalse(create.isEnabled)
 
     XCTAssertFalse(
       form.subviews.contains { ($0.accessibilityIdentifier() ?? "").hasPrefix("lab-rail-new-tag-row-") },
@@ -273,6 +304,11 @@ final class WorkspaceTagDirectoryTests: XCTestCase {
     form.field.stringValue = "fresh"
     form.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: form.field))
     XCTAssertTrue(create.isEnabled)
+    XCTAssertEqual(create.keyEquivalent, "\r")
+    form.field.stringValue = "测试 1"
+    form.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: form.field))
+    XCTAssertFalse(create.isEnabled)
+    XCTAssertEqual(create.keyEquivalent, "")
 
     form.show("taken")
     form.layoutSubtreeIfNeeded()
@@ -284,6 +320,129 @@ final class WorkspaceTagDirectoryTests: XCTestCase {
       WorkspaceTagCreatePlacement.errorGap,
       accuracy: 0.01
     )
+
+    let invalid = WorkspaceTagCopy.text("tag_directory_invalid")
+    form.show(invalid)
+    form.layoutSubtreeIfNeeded()
+    XCTAssertEqual(form.frame.width, WorkspaceTagCreatePlacement.formWidth, accuracy: 0.01)
+    XCTAssertEqual(form.preferredSize.width, WorkspaceTagCreatePlacement.formWidth, accuracy: 0.01)
+    let wrapped = try child("lab-rail-new-tag-error")
+    let wrappedAlignment = wrapped.alignmentRect(forFrame: wrapped.frame)
+    XCTAssertLessThanOrEqual(wrappedAlignment.maxX, form.frame.width - inset + 0.01)
+    XCTAssertGreaterThanOrEqual(wrappedAlignment.minX, inset - 0.01)
+    XCTAssertLessThanOrEqual(wrapped.frame.maxY, form.frame.height - inset + 0.01)
+    XCTAssertLessThanOrEqual(create.frame.maxY, form.frame.height)
+    XCTAssertLessThanOrEqual(field.frame.maxY, form.frame.height)
+  }
+
+  @MainActor
+  func testValidationMessageUsesTheRenderedCellHeightAndCanWrap() throws {
+    let form = WorkspaceTagCreateFormView(frame: NSRect(
+      origin: .zero, size: WorkspaceTagCreatePlacement.formSize(showsError: false)
+    ))
+    for message in [
+      "标签名不能为空、不能含空格，最多 32 个字符。",
+      "A tag cannot be empty, contain spaces, or be longer than 32 characters."
+    ] {
+      form.show(message)
+      form.layoutSubtreeIfNeeded()
+      let label = try XCTUnwrap(form.subviews.first {
+        $0.accessibilityIdentifier() == "lab-rail-new-tag-error"
+      } as? NSTextField)
+      XCTAssertFalse(label.cell!.usesSingleLineMode, "wrapping flags alone do not disable label single-line rendering")
+      let needed = label.cell!.cellSize(forBounds: NSRect(
+        x: 0, y: 0, width: label.bounds.width, height: .greatestFiniteMagnitude
+      )).height
+      XCTAssertGreaterThan(needed, WorkspaceTagCreatePlacement.errorHeight)
+      XCTAssertGreaterThanOrEqual(label.bounds.height, ceil(needed))
+      XCTAssertEqual(form.frame.width, WorkspaceTagCreatePlacement.formWidth)
+      for view in form.subviews where !view.isHidden {
+        XCTAssertTrue(form.bounds.insetBy(dx: -0.5, dy: -0.5).contains(view.frame), "\(view.frame) outside \(form.bounds)")
+      }
+    }
+    form.show("")
+    XCTAssertEqual(form.frame.size, WorkspaceTagCreatePlacement.formSize(showsError: false))
+  }
+
+  @MainActor
+  func testItemFormSharesButtonsAndWrapsErrorsWithoutMovingItsFields() throws {
+    let size = WorkspaceTagCreatePlacement.formSize(fields: 2, showsError: false)
+    let form = WorkspaceItemCreateFormView(frame: NSRect(origin: .zero, size: size))
+    form.layoutSubtreeIfNeeded()
+    let fieldFrame = form.bodyField.frame
+    let cancel = try XCTUnwrap(form.subviews.first {
+      $0.accessibilityIdentifier() == "lab-item-create-cancel"
+    } as? NSButton)
+    let create = try XCTUnwrap(form.subviews.first {
+      $0.accessibilityIdentifier() == "lab-item-create-confirm"
+    } as? NSButton)
+    XCTAssertEqual(cancel.frame.minX, WorkspaceTagCreatePlacement.contentInset)
+    XCTAssertEqual(create.frame.maxX, size.width - WorkspaceTagCreatePlacement.contentInset)
+    XCTAssertEqual(cancel.frame.width, create.frame.width)
+    XCTAssertEqual(cancel.keyEquivalent, "\u{1b}")
+    var commits: [(String, String)] = []
+    var cancelled = false
+    form.onCommit = { commits.append(($0, $1)) }
+    form.onCancel = { cancelled = true }
+    form.titleField.stringValue = "name"
+    form.bodyField.stringValue = "  body\n"
+    form.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
+    XCTAssertTrue(create.isEnabled)
+    let editor = NSTextView()
+    XCTAssertTrue(form.control(form.bodyField, textView: editor, doCommandBy: #selector(NSResponder.insertNewline(_:))))
+    XCTAssertEqual(commits.first?.0, "name")
+    XCTAssertEqual(commits.first?.1, "  body\n")
+    XCTAssertTrue(form.control(form.bodyField, textView: editor, doCommandBy: #selector(NSResponder.cancelOperation(_:))))
+    XCTAssertTrue(cancelled)
+
+    for message in [String(repeating: "保存失败，请重试。", count: 8), "重试", ""] {
+      form.showError(message)
+      let label = try XCTUnwrap(form.subviews.first {
+        $0.accessibilityIdentifier() == "lab-item-create-error"
+      } as? NSTextField)
+      XCTAssertEqual(form.bodyField.frame, fieldFrame)
+      XCTAssertEqual(form.frame.width, size.width)
+      XCTAssertEqual(label.isHidden, message.isEmpty)
+      if !message.isEmpty {
+        XCTAssertGreaterThanOrEqual(label.frame.height, FormValidation.height(of: label, width: label.bounds.width))
+        XCTAssertTrue(form.bounds.contains(label.frame))
+      }
+    }
+    XCTAssertEqual(form.frame.size, size)
+  }
+
+  @MainActor
+  func testSwiftUIFormActionsUseFullWidthNativeButtons() throws {
+    var confirms = 0
+    var cancels = 0
+    let width = WorkspaceTagCreatePlacement.formWidth - 2 * WorkspaceTagCreatePlacement.contentInset
+    let host = NSHostingView(rootView: FormActions(
+      primaryTitleKey: "edit_save", primaryHelpKey: "title_save_help",
+      cancelIdentifier: "form-cancel", primaryIdentifier: "form-confirm",
+      onCancel: { cancels += 1 }, onConfirm: { confirms += 1 }
+    ).frame(width: width, height: WorkspaceTagCreatePlacement.buttonHeight))
+    host.frame = NSRect(x: 0, y: 0, width: width, height: WorkspaceTagCreatePlacement.buttonHeight)
+    host.layoutSubtreeIfNeeded()
+    func buttons(in view: NSView) -> [NSButton] {
+      (view as? NSButton).map { [$0] } ?? view.subviews.flatMap { buttons(in: $0) }
+    }
+    let controls = buttons(in: host)
+    let cancel = try XCTUnwrap(controls.first { $0.accessibilityIdentifier() == "form-cancel" })
+    let confirm = try XCTUnwrap(controls.first { $0.accessibilityIdentifier() == "form-confirm" })
+    let left = host.convert(cancel.bounds, from: cancel)
+    let right = host.convert(confirm.bounds, from: confirm)
+    XCTAssertEqual(left.width, (width - WorkspaceTagCreatePlacement.buttonGap) / 2, accuracy: 0.5)
+    XCTAssertEqual(left.width, right.width, accuracy: 0.5)
+    XCTAssertEqual(left.minX, 0, accuracy: 0.5)
+    XCTAssertEqual(right.maxX, width, accuracy: 0.5)
+    for button in [cancel, confirm] {
+      XCTAssertEqual(button.bezelStyle, .rounded)
+      XCTAssertFalse((button.toolTip ?? "").isEmpty)
+      XCTAssertNotNil(button.hitTest(NSPoint(x: button.frame.minX + 4, y: button.frame.midY)))
+      button.performClick(nil)
+    }
+    XCTAssertEqual(confirms, 1)
+    XCTAssertEqual(cancels, 1)
   }
 
   @MainActor

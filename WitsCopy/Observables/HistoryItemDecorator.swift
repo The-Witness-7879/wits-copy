@@ -63,7 +63,7 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     item.previewableText
   }
   var thumbnailImage: NSImage?
-  var applicationImage: ApplicationImage
+  var applicationImage: SourceIcon
 
   // 10k characters seems to be more than enough on large displays
   var text: String { previewText.shortened(to: 10_000) }
@@ -116,7 +116,11 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
     self.item = item
     self.shortcuts = shortcuts
     self.title = item.title
-    self.applicationImage = ApplicationImageCache.shared.getImage(item: item)
+    if item.application == LabRuntime.snippetSource {
+      self.applicationImage = .systemSymbol("note.text")
+    } else {
+      self.applicationImage = .application(ApplicationImageCache.shared.getImage(item: item))
+    }
 
     synchronizeItemPin()
     synchronizeItemTitle()
@@ -224,6 +228,26 @@ class HistoryItemDecorator: Identifiable, Hashable, HasVisibility {
   @MainActor
   func noteContentChanged() {
     contentRevision += 1
+  }
+
+  /// 标题事务：调用方可在持久化前校验；失败时恢复标题、来源三态和高亮。
+  @MainActor
+  func saveTitle(_ name: String, validating validate: () throws -> Void = {}) throws {
+    let previous = (title: item.title, source: item.titleIsCustom, highlight: attributedTitle)
+    item.applyTitleEdit(name)
+    title = item.title
+    attributedTitle = nil
+    do {
+      try validate()
+      try Storage.shared.save()
+    } catch {
+      item.title = previous.title
+      item.titleIsCustom = previous.source
+      title = previous.title
+      attributedTitle = previous.highlight
+      throw error
+    }
+    noteContentChanged()
   }
 
   @MainActor

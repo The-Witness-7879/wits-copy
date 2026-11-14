@@ -14,6 +14,11 @@ struct WorkspaceManagementRail: View {
   @State private var directoryError: String?
   /// 「新建标签」行的弹窗锚点。SwiftUI 行里塞一个透明 NSView 用来定位。
   @State private var plusAnchor: NSView?
+  @State private var allAnchor: NSView?
+  @State private var itemCreator = WorkspaceItemCreateController()
+  @State private var draggingTag: String?
+  @State private var dragTranslation: CGFloat = 0
+  @State private var reorderShifts: [String: CGFloat] = [:]
 
   private var railTags: [String] {
     WorkspaceTagDirectory.ordered(stored: storedTags, itemTags: appState.history.knownTags)
@@ -30,10 +35,27 @@ struct WorkspaceManagementRail: View {
           VStack(alignment: .leading, spacing: WorkspaceRailFlow.spacing) {
             ForEach(WorkspaceSection.primaryRail) { section in
               railButton(section, expanded: expanded)
+                .background {
+                  if section == .all {
+                    WorkspaceRailAnchor { allAnchor = $0 }
+                  }
+                }
+                .overlay {
+                  if section == .all {
+                    RailContextMenuHost(items: allContextItems)
+                      .frame(maxWidth: .infinity, maxHeight: .infinity)
+                  }
+                }
             }
             ForEach(tags, id: \.self) { tag in
               WorkspaceRailTagButton(tag: tag, expanded: expanded)
-                .id(tag)
+              .id(tag)
+              .offset(y: draggingTag == tag ? dragTranslation : (reorderShifts[tag] ?? 0))
+              .animation(draggingTag == tag ? .none : .smooth(duration: 0.22), value: reorderShifts)
+              .scaleEffect(draggingTag == tag ? 1.02 : 1)
+              .shadow(color: draggingTag == tag ? .black.opacity(0.16) : .clear, radius: 6, y: 2)
+              .zIndex(draggingTag == tag ? 1 : 0)
+              .highPriorityGesture(reorderGesture(for: tag))
             }
             WorkspaceRailRow(
               systemName: "plus",
@@ -92,6 +114,66 @@ struct WorkspaceManagementRail: View {
     ) {
       Button("clear_alert_confirm", role: .cancel) {}
         .help("directory_error_dismiss_help")
+    }
+  }
+
+  private var reorderPitch: CGFloat { WorkspaceRailMetrics.hit + WorkspaceRailFlow.spacing }
+
+  private func reorderGesture(for tag: String) -> some Gesture {
+    DragGesture(minimumDistance: 8)
+      .onChanged { value in
+        draggingTag = tag
+        dragTranslation = value.translation.height
+        let slot = WorkspaceTagReorder.slot(
+          moving: tag,
+          translation: value.translation.height,
+          order: railTags,
+          pitch: reorderPitch
+        )
+        reorderShifts = WorkspaceTagReorder.shifts(
+          moving: tag,
+          slot: slot,
+          order: railTags,
+          pitch: reorderPitch
+        )
+      }
+      .onEnded { value in
+        let slot = WorkspaceTagReorder.slot(
+          moving: tag,
+          translation: value.translation.height,
+          order: railTags,
+          pitch: reorderPitch
+        )
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+          if let slot,
+             let next = WorkspaceTagDirectory.placing(
+               tag,
+               before: slot.before,
+               atEnd: slot.atEnd,
+               stored: storedTags,
+               itemTags: appState.history.knownTags
+             ) {
+            storedTags = next
+          }
+          draggingTag = nil
+          dragTranslation = 0
+          reorderShifts = [:]
+        }
+      }
+  }
+
+  private var allContextItems: [RailContextItem] {
+    [RailContextItem(titleKey: "create_snippet") { presentItemCreate(tag: nil) }]
+  }
+
+  private func presentItemCreate(tag: String?) {
+    guard let allAnchor else { return }
+    itemCreator.present(from: allAnchor) { title, body in
+      appState.history.createTextItem(title: title, text: body, tag: tag) == nil
+        ? NSLocalizedString("save_failed", comment: "")
+        : nil
     }
   }
 
@@ -279,11 +361,14 @@ private enum RailTagEdit: Equatable {
 struct WorkspaceRailTagButton: View {
   var tag: String
   var expanded: Bool = false
+  var insertionTargeted: Bool = false
   @Environment(AppState.self) private var appState
   @State private var edit: RailTagEdit?
   @State private var confirmDelete = false
   @State private var editError: String?
   @State private var dropHighlighted = false
+  @State private var createAnchor: NSView?
+  @State private var itemCreator = WorkspaceItemCreateController()
 
   private var selected: Bool {
     WorkspaceRailPolicy.isTagSelected(tag, tagFilter: appState.history.tagFilter)
@@ -295,12 +380,13 @@ struct WorkspaceRailTagButton: View {
       title: tag,
       expanded: expanded,
       selected: selected,
-      dropTargeted: dropHighlighted,
+      dropTargeted: dropHighlighted || insertionTargeted,
       help: tag,
       identifier: WorkspaceRailPolicy.accessibilityIdentifier(for: tag),
       onTap: { WorkspaceRailPolicy.selectTag(tag, in: appState) },
       onIconTap: { present(.appearance) }
     )
+    .background(WorkspaceRailAnchor { createAnchor = $0 })
     .onDrop(
       of: [UTType(exportedAs: WorkspaceItemDrag.typeIdentifier)],
       isTargeted: $dropHighlighted
@@ -317,11 +403,9 @@ struct WorkspaceRailTagButton: View {
       }
       return true
     }
-    .contextMenu {
-      Button(NSLocalizedString("tag_rename_menu", comment: "")) { present(.rename) }
-      Button(NSLocalizedString("tag_merge_menu", comment: "")) { present(.merge) }
-      Divider()
-      Button(NSLocalizedString("tag_delete_menu", comment: "")) { presentDelete() }
+    .overlay {
+      RailContextMenuHost(items: tagContextItems)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     .iconHelp(tag)
     .accessibilityValue(WorkspaceRailFeedback.accessibilityValue(selected: selected, dropTarget: dropHighlighted))
@@ -360,6 +444,24 @@ struct WorkspaceRailTagButton: View {
       get: { edit != nil },
       set: { if !$0 { edit = nil } }
     )
+  }
+
+  private var tagContextItems: [RailContextItem] {
+    [
+      RailContextItem(titleKey: "create_snippet", action: presentItemCreate),
+      RailContextItem(titleKey: "tag_rename_menu", separatorBefore: true) { present(.rename) },
+      RailContextItem(titleKey: "tag_merge_menu") { present(.merge) },
+      RailContextItem(titleKey: "tag_delete_menu", separatorBefore: true, action: presentDelete)
+    ]
+  }
+
+  private func presentItemCreate() {
+    guard let createAnchor else { return }
+    itemCreator.present(from: createAnchor) { title, body in
+      appState.history.createTextItem(title: title, text: body, tag: tag) == nil
+        ? NSLocalizedString("save_failed", comment: "")
+        : nil
+    }
   }
 
   private func present(_ next: RailTagEdit) {
@@ -406,7 +508,7 @@ struct WorkspaceRailTagButton: View {
   }
 }
 
-private struct RailTagNamePopover: View {
+struct RailTagNamePopover: View {
   var tag: String
   var merging: Bool
   @Environment(AppState.self) private var appState
@@ -414,7 +516,7 @@ private struct RailTagNamePopover: View {
   @Default(.workspaceTagDirectory) private var storedTags
   @State private var draft = ""
   @State private var editError: String?
-  @FocusState private var draftFocused: Bool
+  @State private var holdingPanelKeys = false
 
   private var mergeTargets: [String] {
     WorkspaceTagDirectory.ordered(stored: storedTags, itemTags: appState.history.knownTags)
@@ -422,16 +524,11 @@ private struct RailTagNamePopover: View {
   }
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
+    VStack(alignment: .leading, spacing: WorkspaceTagCreatePlacement.titleToField) {
       Text(merging ? String(format: NSLocalizedString("tag_merge_heading", comment: ""), tag) : NSLocalizedString("tag_rename", comment: ""))
-        .font(.headline)
+        .font(.system(size: 13, weight: .semibold))
         .fixedSize(horizontal: false, vertical: true)
-      if !merging {
-        Text(verbatim: tag)
-          .font(.caption)
-          .foregroundStyle(.secondary)
-          .lineLimit(1)
-      }
+        .frame(minHeight: WorkspaceTagCreatePlacement.titleHeight, alignment: .leading)
       if merging {
         mergeList
       } else {
@@ -439,32 +536,43 @@ private struct RailTagNamePopover: View {
       }
       if let editError {
         Text(editError)
-          .font(.caption)
+          .font(.system(size: 11))
           .foregroundStyle(.red)
+          .fixedSize(horizontal: false, vertical: true)
           .accessibilityIdentifier("lab-rail-tag-error")
       }
     }
-    .padding(12)
-    .frame(width: 220)
+    .padding(WorkspaceTagCreatePlacement.contentInset)
+    .frame(width: WorkspaceTagCreatePlacement.formWidth)
     .onAppear {
       draft = tag
       editError = nil
-      if !merging {
-        DispatchQueue.main.async { draftFocused = true }
+      if !holdingPanelKeys {
+        holdingPanelKeys = true
+        appState.beginDirectoryForm()
+      }
+    }
+    .onDisappear {
+      if holdingPanelKeys {
+        holdingPanelKeys = false
+        appState.endDirectoryForm()
       }
     }
   }
 
   private var renameField: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      TextField("tag_rename", text: $draft)
-        .glassTextField()
-        .focused($draftFocused)
-        .accessibilityIdentifier("lab-rail-rename-field")
-        .onSubmit(commitRename)
-      Button("tag_rename", action: commitRename)
-        .iconHelp(NSLocalizedString("tag_rename_help", comment: ""))
-        .accessibilityIdentifier("lab-rail-rename-confirm")
+    VStack(alignment: .leading, spacing: WorkspaceTagCreatePlacement.fieldToButtons) {
+      TagDraftField(
+        text: $draft, onSubmit: commitRename, identifier: "lab-rail-rename-field",
+        placeholderKey: "tag_rename", onCancel: { dismiss() }
+      )
+      .frame(height: GlassField.height)
+      FormActions(
+        primaryTitleKey: "edit_save", primaryHelpKey: "tag_rename_help",
+        cancelIdentifier: "lab-rail-rename-cancel", primaryIdentifier: "lab-rail-rename-confirm",
+        primaryEnabled: HistoryItem.normalizedTag(draft) != nil,
+        onCancel: { dismiss() }, onConfirm: commitRename
+      )
     }
   }
 
@@ -489,6 +597,10 @@ private struct RailTagNamePopover: View {
   }
 
   private func commitRename() {
+    guard HistoryItem.normalizedTag(draft) != nil else {
+      editError = WorkspaceTagDirectoryError.invalidName.message
+      return
+    }
     switch WorkspaceTagDirectoryActions.rename(
       from: tag,
       to: draft,
@@ -568,7 +680,8 @@ struct WorkspaceOptionsButton: View {
   var arrowEdge: Edge = .trailing
   var hit = CGSize(width: PanelSplit.railHitSize, height: PanelSplit.railHitSize)
   @Environment(AppState.self) private var appState
-  @State private var snippetPresented = false
+  @State private var createAnchor: NSView?
+  @State private var itemCreator = WorkspaceItemCreateController()
 
   var body: some View {
     ImmediateMenuButton(
@@ -579,10 +692,7 @@ struct WorkspaceOptionsButton: View {
       entries: optionEntries
     )
     .frame(width: hit.width, height: hit.height)
-    .popover(isPresented: $snippetPresented, arrowEdge: arrowEdge) {
-      SnippetComposer()
-        .environment(appState)
-    }
+    .background(WorkspaceRailAnchor { createAnchor = $0 })
     .accessibilityIdentifier("lab-options-button")
   }
 
@@ -600,51 +710,18 @@ struct WorkspaceOptionsButton: View {
     entries.append(ImmediateMenuEntry(
       title: NSLocalizedString("create_snippet", comment: ""),
       identifier: "lab-option-create-snippet",
-      action: { snippetPresented = true }
+      action: { presentItemCreate() }
     ))
     return entries
   }
-}
 
-struct SnippetComposer: View {
-  @Environment(AppState.self) private var appState
-  @Environment(\.dismiss) private var dismiss
-  @State private var title = ""
-  @State private var text = ""
-
-  var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Text("create_snippet")
-        .font(.headline)
-      TextField(NSLocalizedString("snippet_title_field", comment: ""), text: $title)
-        .glassTextField()
-        .accessibilityIdentifier("lab-snippet-title")
-      TextField(NSLocalizedString("snippet_body_field", comment: ""), text: $text)
-        .glassTextField()
-        .accessibilityIdentifier("lab-snippet-body")
-      Button(NSLocalizedString("snippet_add", comment: ""), action: addSnippet)
-        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        .iconHelp(NSLocalizedString(
-          "snippet_add_help",
-          value: "Add this snippet",
-          comment: "Hover help for adding a pinned snippet"
-        ))
-        .accessibilityIdentifier("lab-snippet-add")
-      if let message = appState.storageError {
-        Text(message)
-          .font(.caption)
-          .foregroundStyle(.red)
-      }
+  private func presentItemCreate() {
+    guard let createAnchor else { return }
+    itemCreator.present(from: createAnchor) { title, body in
+      appState.history.createTextItem(title: title, text: body, tag: appState.history.tagFilter) == nil
+        ? NSLocalizedString("save_failed", comment: "")
+        : nil
     }
-    .padding(12)
-    .frame(width: 260)
-  }
-
-  private func addSnippet() {
-    guard appState.history.createSnippet(title: title, text: text) != nil else { return }
-    title = ""
-    text = ""
-    dismiss()
   }
 }
 
@@ -754,7 +831,6 @@ struct WorkspaceRailRow: View {
   }
 }
 
-/// 给「新建标签」行一个可用的 NSView 作为弹窗定位锚点。
 struct WorkspaceRailAnchor: NSViewRepresentable {
   var onResolve: (NSView) -> Void
 
@@ -766,5 +842,122 @@ struct WorkspaceRailAnchor: NSViewRepresentable {
 
   func updateNSView(_ nsView: NSView, context: Context) {
     DispatchQueue.main.async { onResolve(nsView) }
+  }
+}
+
+/// 分类右键菜单共用同一宽度。不能按当前可见项收缩，否则「全部」只有「新建」时会缩成说明浮窗。
+struct RailContextItem {
+  var titleKey: String
+  var separatorBefore = false
+  var action: () -> Void
+}
+
+enum WorkspaceCategoryMenu {
+  static let familyTitleKeys = [
+    "create_snippet",
+    "tag_rename_menu",
+    "tag_merge_menu",
+    "tag_delete_menu"
+  ]
+
+  static func minimumWidth(titleKeys: [String] = familyTitleKeys) -> CGFloat {
+    let cell = NSMenuItemCell()
+    let width = titleKeys.map { key -> CGFloat in
+      let item = NSMenuItem(
+        title: NSLocalizedString(key, comment: ""),
+        action: nil,
+        keyEquivalent: ""
+      )
+      cell.menuItem = item
+      return cell.cellSize.width
+    }.max() ?? 0
+    return ceil(width)
+  }
+
+  static func menu(items: [RailContextItem]) -> (NSMenu, [MenuActionTarget]) {
+    let menu = NSMenu()
+    menu.autoenablesItems = false
+    menu.minimumWidth = minimumWidth()
+    var targets: [MenuActionTarget] = []
+    for item in items {
+      if item.separatorBefore {
+        menu.addItem(.separator())
+      }
+      let entry = NSMenuItem(
+        title: NSLocalizedString(item.titleKey, comment: ""),
+        action: #selector(MenuActionTarget.fire(_:)),
+        keyEquivalent: ""
+      )
+      let target = MenuActionTarget(item.action)
+      entry.target = target
+      entry.isEnabled = true
+      targets.append(target)
+      menu.addItem(entry)
+    }
+    return (menu, targets)
+  }
+}
+
+struct RailContextMenuHost: NSViewRepresentable {
+  var items: [RailContextItem]
+
+  func makeNSView(context: Context) -> RailContextMenuView {
+    let view = RailContextMenuView()
+    view.items = items
+    return view
+  }
+
+  func updateNSView(_ view: RailContextMenuView, context: Context) {
+    view.items = items
+  }
+}
+
+final class RailContextMenuView: NSView {
+  var items: [RailContextItem] = []
+  private var retainedTargets: [MenuActionTarget] = []
+
+  override var intrinsicContentSize: NSSize {
+    NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+  }
+
+  /// 左键、拖拽、放下仍交给原来的行。只接右键和按住 Control 的点击。
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    guard bounds.contains(point), let event = NSApp.currentEvent, claims(event) else { return nil }
+    return self
+  }
+
+  override func rightMouseDown(with event: NSEvent) {
+    present(event)
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    guard event.modifierFlags.contains(.control) else {
+      super.mouseDown(with: event)
+      return
+    }
+    present(event)
+  }
+
+  private func claims(_ event: NSEvent) -> Bool {
+    switch event.type {
+    case .rightMouseDown, .rightMouseUp, .rightMouseDragged:
+      return true
+    case .leftMouseDown, .leftMouseUp, .leftMouseDragged:
+      return event.modifierFlags.contains(.control)
+    default:
+      return false
+    }
+  }
+
+  private func present(_ event: NSEvent) {
+    guard window != nil, !AppState.shared.menuTracking, !items.isEmpty else { return }
+    let (menu, targets) = WorkspaceCategoryMenu.menu(items: items)
+    retainedTargets = targets
+    AppState.shared.menuTracking = true
+    defer {
+      AppState.shared.menuTracking = false
+      retainedTargets = []
+    }
+    NSMenu.popUpContextMenu(menu, with: event, for: self)
   }
 }

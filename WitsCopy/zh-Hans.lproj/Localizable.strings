@@ -71,7 +71,9 @@
 "pdf_next_page" = "下一页";
 "kind_video" = "视频";
 "kind_audio" = "音频";
-"create_snippet" = "新建置顶";
+"create_snippet" = "新建";
+"item_create_title" = "标题";
+"item_create_body" = "内容";
 "about_summary" = "常驻菜单栏的剪贴板历史工具。复制过的文字、图片和文件自动留存，可以搜索、置顶、打标签，粘贴前先预览。历史只保存在这台 Mac 上，不会上传。";
 "clear_all_alert_message" = "确定要全部清除吗？";
 "clear_all_alert_comment" = "置顶和带标签的内容也会一并删除，无法撤销。";
@@ -124,7 +126,14 @@
 "tag_rename_help" = "重命名";
 "tag_merge_help" = "合并";
 "snippet_add_help" = "添加置顶";
-"snippet_title_field" = "标题";
+"snippet_title_field" = "名称（可选）";
+"row_rename" = "重命名";
+"row_rename_help" = "修改名称，不改变复制内容。";
+"title_name_placeholder" = "名称";
+"edit_save" = "保存";
+"edit_cancel" = "取消";
+"edit_cancel_help" = "取消";
+"title_save_help" = "保存";
 "snippet_body_field" = "内容";
 "snippet_add" = "添加";
 "clear_alert_confirm_help" = "清除";

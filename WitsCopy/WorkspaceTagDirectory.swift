@@ -30,6 +30,31 @@ enum WorkspaceTagDirectory {
     return .success(current + [name])
   }
 
+  /// Visible order, with `moving` inserted at `target`'s slot, or at the end.
+  /// 「全部」 is not a tag and is never part of this order.
+  static func placing(
+    _ moving: String,
+    before target: String?,
+    atEnd: Bool = false,
+    stored: [String],
+    itemTags: [String]
+  ) -> [String]? {
+    guard HistoryItem.normalizedTag(moving) != nil else { return nil }
+    if let target, HistoryItem.normalizedTag(target) == nil { return nil }
+    var order = ordered(stored: stored, itemTags: itemTags)
+    guard let from = order.firstIndex(where: { $0.caseInsensitiveCompare(moving) == .orderedSame }) else { return nil }
+    let name = order.remove(at: from)
+    if atEnd || target == nil {
+      order.append(name)
+      return order
+    }
+    guard let target, let dest = order.firstIndex(where: { $0.caseInsensitiveCompare(target) == .orderedSame }) else {
+      return nil
+    }
+    order.insert(name, at: dest)
+    return order
+  }
+
   /// What a typed name means when the user confirms the create form.
   /// A name that already exists is not an error to show in a create sheet:
   /// it is that category, so confirming it switches there.
@@ -219,7 +244,13 @@ enum WorkspaceTagCreatePlacement {
 
   /// Height follows content: no error row when there is no error.
   static func formSize(showsError: Bool) -> CGSize {
-    var height = contentInset + titleHeight + titleToField + fieldHeight
+    formSize(fields: 1, showsError: showsError)
+  }
+
+  static func formSize(fields: Int, showsError: Bool) -> CGSize {
+    let count = max(fields, 1)
+    var height = contentInset + titleHeight + titleToField + fieldHeight * CGFloat(count)
+      + titleToField * CGFloat(count - 1)
       + fieldToButtons + buttonHeight + contentInset
     if showsError {
       height += errorGap + errorHeight
@@ -248,6 +279,25 @@ enum WorkspaceTagDirectoryActions {
         return .success(next)
       }
     }
+  }
+
+  static func reorder(
+    moving: String,
+    before target: String?,
+    atEnd: Bool = false,
+    itemTags: [String],
+    writer: WorkspaceTagDirectoryWriting = DefaultsTagDirectoryWriter()
+  ) -> Bool {
+    guard let next = WorkspaceTagDirectory.placing(
+      moving,
+      before: target,
+      atEnd: atEnd,
+      stored: writer.loadNames(),
+      itemTags: itemTags
+    ) else {
+      return false
+    }
+    return writer.saveNames(next)
   }
 
   static func create(
@@ -285,6 +335,9 @@ enum WorkspaceTagDirectoryActions {
     rollbackHistory: (_ restoredName: String) -> Bool,
     writer: WorkspaceTagDirectoryWriting = DefaultsTagDirectoryWriter()
   ) -> Result<Void, WorkspaceTagDirectoryError> {
+    guard HistoryItem.normalizedTag(from) != nil, HistoryItem.normalizedTag(to) != nil else {
+      return .failure(.invalidName)
+    }
     let stored = writer.loadNames()
     guard renameHistory() else { return .failure(.historyFailed) }
     guard let renamed = WorkspaceTagDirectory.renaming(stored, from: from, to: to) else {
@@ -354,6 +407,56 @@ enum WorkspaceItemDrop {
     if let tag, HistoryItem.normalizedTag(tag) == nil { return .failure(.invalidName) }
     guard apply(token, tag) else { return .failure(.assignFailed) }
     return .success(())
+  }
+}
+
+enum WorkspaceTagReorder {
+  struct Slot: Equatable {
+    var before: String?
+    var atEnd: Bool
+  }
+
+  /// How far each stationary row slides so a gap opens at the insertion slot.
+  /// Positive is down. The dragged row is omitted; it follows the pointer.
+  static func shifts(moving: String, slot: Slot?, order: [String], pitch: CGFloat) -> [String: CGFloat] {
+    guard pitch > 0, let from = order.firstIndex(where: { $0.caseInsensitiveCompare(moving) == .orderedSame }) else {
+      return [:]
+    }
+    let remaining = order.enumerated().filter { $0.offset != from }.map(\.element)
+    let hole: Int
+    if let slot, slot.atEnd {
+      hole = remaining.count
+    } else if let before = slot?.before,
+              let index = remaining.firstIndex(where: { $0.caseInsensitiveCompare(before) == .orderedSame }) {
+      hole = index
+    } else {
+      return [:]
+    }
+    var result: [String: CGFloat] = [:]
+    for (index, name) in order.enumerated() where index != from {
+      let packed = index > from ? index - 1 : index
+      let visual = packed >= hole ? packed + 1 : packed
+      let delta = CGFloat(visual - index) * pitch
+      if abs(delta) > 0.5 {
+        result[name] = delta
+      }
+    }
+    return result
+  }
+
+  /// Row pitch, not screen coordinates. Half a row is enough to open the next slot.
+  static func slot(moving: String, translation: CGFloat, order: [String], pitch: CGFloat) -> Slot? {
+    guard pitch > 0,
+          let from = order.firstIndex(where: { $0.caseInsensitiveCompare(moving) == .orderedSame }) else {
+      return nil
+    }
+    let steps = Int((translation / pitch).rounded())
+    let to = min(max(from + steps, 0), order.count - 1)
+    if to == from { return nil }
+    if to >= order.count - 1 { return Slot(before: nil, atEnd: true) }
+    if to < from { return Slot(before: order[to], atEnd: false) }
+    if to + 1 >= order.count { return Slot(before: nil, atEnd: true) }
+    return Slot(before: order[to + 1], atEnd: false)
   }
 }
 

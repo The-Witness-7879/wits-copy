@@ -75,6 +75,55 @@ class HistoryItem {
   var pin: String?
   var tags: [String] = []
   var title = ""
+  /// Nil belongs only to records written before title provenance was persisted.
+  var titleIsCustom: Bool?
+
+  var isTitleCustom: Bool { titleIsCustom == true }
+
+  @discardableResult
+  func setCustomTitle(_ name: String) -> Bool {
+    guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+    title = name
+    titleIsCustom = true
+    return true
+  }
+
+  func restoreAutomaticTitle() {
+    titleIsCustom = false
+    title = generateTitle()
+  }
+
+  /// All explicit edits use the same trim/empty-to-automatic rule.
+  func applyTitleEdit(_ name: String) {
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty {
+      restoreAutomaticTitle()
+    } else {
+      setCustomTitle(trimmed)
+    }
+  }
+
+  func syncAutomaticTitle() {
+    migrateLegacyTitleSource()
+    guard !isTitleCustom else { return }
+    title = generateTitle()
+  }
+
+  /// A nonempty legacy title has unknown provenance, even when it matches today's generated title.
+  /// Preserve it until the user explicitly restores automatic naming. Never infer twice.
+  @discardableResult
+  func migrateLegacyTitleSource() -> Bool {
+    guard titleIsCustom == nil else { return false }
+    titleIsCustom = !title.isEmpty
+    return true
+  }
+
+  func inheritTitle(from item: HistoryItem) {
+    item.migrateLegacyTitleSource()
+    title = item.title
+    titleIsCustom = item.titleIsCustom
+    syncAutomaticTitle()
+  }
 
   static let maxTagLength = 32
 
@@ -162,6 +211,7 @@ class HistoryItem {
     self.firstCopiedAt = firstCopiedAt
     self.lastCopiedAt = lastCopiedAt
     self.contents = contents
+    self.titleIsCustom = false
   }
 
   func supersedes(_ item: HistoryItem) -> Bool {
@@ -178,7 +228,7 @@ class HistoryItem {
     // Images are not OCR'd here. Recognition is an explicit preview action and must not
     // overwrite a manual title, or run Vision on the model from this call.
     if hasImagePayload {
-      return title
+      return ""
     }
 
     // 1k characters is trade-off for performance
@@ -213,7 +263,7 @@ class HistoryItem {
     } else if let html = html, !html.string.isEmpty {
       html.string
     } else {
-      title
+      ""
     }
   }
 

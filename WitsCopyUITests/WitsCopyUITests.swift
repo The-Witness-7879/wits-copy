@@ -738,3 +738,144 @@ final class LabTagUITests: XCTestCase {
     XCTAssertFalse(app.buttons["lab-clear-tag-filter"].exists)
   }
 }
+
+/// Synthetic in-memory smoke rows only; no system pasteboard or real user store.
+/// Leader: xcodebuild -project WitsCopy.xcodeproj -scheme WitsCopy -destination 'platform=macOS'
+///   -only-testing:WitsCopyUITests/LabTitleUITests test
+final class LabTitleUITests: XCTestCase {
+  let app = XCUIApplication()
+
+  override func setUp() {
+    super.setUp()
+    continueAfterFailure = false
+    app.launchArguments = ["--lab-smoke", "-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_Hans"]
+    app.launch()
+  }
+
+  override func tearDown() {
+    app.terminate()
+    super.tearDown()
+  }
+
+  func testRowMenuRenameSaveReplaceAndRestoreAutomaticTitle() {
+    let original = "Standup notes for Monday"
+    openRename(on: original)
+    let field = app.textFields["lab-title-field"]
+    XCTAssertEqual(field.value as? String, original)
+    XCTAssertFalse(app.buttons["lab-title-restore"].exists)
+    XCTAssertTrue(app.buttons["lab-title-cancel"].exists)
+    replaceName("邮箱", in: field)
+    app.typeKey(.enter, modifierFlags: [])
+    XCTAssertTrue(row("邮箱").waitForExistence(timeout: 4))
+    XCTAssertFalse(field.exists)
+
+    openRename(on: "邮箱")
+    replaceName("工作邮箱", in: app.textFields["lab-title-field"])
+    app.buttons["lab-title-save"].click()
+    XCTAssertTrue(row("工作邮箱").waitForExistence(timeout: 4))
+
+    openRename(on: "工作邮箱")
+    replaceName("", in: app.textFields["lab-title-field"])
+    app.buttons["lab-title-save"].click()
+    XCTAssertTrue(row(original).waitForExistence(timeout: 4))
+    XCTAssertFalse(app.textFields["lab-title-field"].exists)
+  }
+
+  func testLongManualNameKeepsNoExcerptTitleOnOneLine() {
+    app.terminate()
+    app.launchArguments += ["--lab-title-no-excerpt-smoke", "-compactRows", "NO"]
+    app.launch()
+
+    // 仅含 RTF：改名后也无摘要，避免摘要分支原有的单行限制掩盖回归。
+    let original = "合成无摘要标题"
+    let originalTitle = app.staticTexts.matching(identifier: "copy-history-item")
+      .matching(NSPredicate(format: "value == %@", original)).firstMatch
+    XCTAssertTrue(originalTitle.waitForExistence(timeout: 8))
+    let singleLineHeight = originalTitle.frame.height
+    XCTAssertGreaterThan(singleLineHeight, 0)
+
+    let longName = String(repeating: "这是用于验证单行截断的超长手工标题", count: 12)
+    openRename(on: original)
+    replaceName(longName, in: app.textFields["lab-title-field"])
+    app.buttons["lab-title-save"].click()
+
+    let savedTitle = app.staticTexts.matching(identifier: "copy-history-item")
+      .matching(NSPredicate(format: "value == %@", longName)).firstMatch
+    XCTAssertTrue(savedTitle.waitForExistence(timeout: 4))
+    XCTAssertFalse(app.textFields["lab-title-field"].exists)
+    XCTAssertEqual(savedTitle.frame.height, singleLineHeight, accuracy: 1)
+  }
+
+  func testEmptyNameDisablesSaveAndEscapeCancelsWithoutChangingRow() {
+    let original = "Standup notes for Monday"
+    openRename(on: original)
+    let field = app.textFields["lab-title-field"]
+    replaceName("  ", in: field)
+    XCTAssertTrue(app.buttons["lab-title-save"].isEnabled)
+    app.buttons["lab-title-cancel"].click()
+    assertTitleEditorCancelled(original: original)
+
+    // Reopening without typing must start a fresh Esc-cancel session.
+    openRename(on: original)
+    app.typeKey(.escape, modifierFlags: [])
+    assertTitleEditorCancelled(original: original)
+  }
+
+  func testTitleEditorOwnsTextEditingAndListShortcuts() {
+    let original = "Standup notes for Monday"
+    openRename(on: original)
+    let field = app.textFields["lab-title-field"]
+    replaceName("alpha beta", in: field)
+    // Option-Delete deletes a word in the field, never the selected history row.
+    field.typeKey(.delete, modifierFlags: .option)
+    XCTAssertEqual(field.value as? String, "alpha ")
+    XCTAssertTrue(row(original).exists)
+
+    // The panel's positional copy shortcut must not steal an editor keystroke.
+    field.typeKey("1", modifierFlags: .command)
+    XCTAssertTrue(field.exists)
+    XCTAssertEqual(field.value as? String, "alpha ")
+    XCTAssertTrue(app.windows["WitsCopy synthetic"].isHittable)
+    field.typeText("gamma")
+    app.typeKey(.enter, modifierFlags: [])
+    XCTAssertTrue(row("alpha gamma").waitForExistence(timeout: 4))
+  }
+
+  private func assertTitleEditorCancelled(original: String) {
+    let gone = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "exists == false"),
+      object: app.textFields["lab-title-field"]
+    )
+    XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 4), .completed)
+    XCTAssertTrue(row(original).isHittable)
+    XCTAssertTrue(app.windows["WitsCopy synthetic"].isHittable)
+  }
+
+  private func row(_ title: String) -> XCUIElement {
+    app.descendants(matching: .any).matching(identifier: "copy-history-item")
+      .matching(NSPredicate(format: "value == %@", title)).firstMatch
+  }
+
+  private func openRename(on title: String) {
+    let target = row(title)
+    XCTAssertTrue(target.waitForExistence(timeout: 8))
+    target.rightClick()
+    let prefixes = ["lab-row-rename-", "lab-row-tag-", "lab-row-pin-", "lab-row-delete-"]
+    let rename = app.menuItems.matching(NSPredicate(format: "identifier BEGINSWITH %@", prefixes[0])).firstMatch
+    XCTAssertTrue(rename.waitForExistence(timeout: 3))
+    let entries = app.menuItems.allElementsBoundByIndex.compactMap { entry in
+      prefixes.first { entry.identifier.hasPrefix($0) }
+    }
+    XCTAssertEqual(entries, prefixes)
+    rename.click()
+    XCTAssertTrue(app.textFields["lab-title-field"].waitForExistence(timeout: 4))
+    XCTAssertTrue(app.descendants(matching: .any)["lab-row-title-editor"].exists)
+    XCTAssertFalse(app.descendants(matching: .any)["lab-row-tag-editor"].exists)
+  }
+
+  private func replaceName(_ name: String, in field: XCUIElement) {
+    field.click()
+    field.typeKey("a", modifierFlags: .command)
+    field.typeText(name)
+  }
+}

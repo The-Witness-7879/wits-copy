@@ -142,16 +142,20 @@ struct WorkspaceItemLabel: Equatable, Sendable {
   var isFile: Bool
 
   /// Display only. Callers must not write this back into pasteboard contents.
-  static func make(storedTitle: String, filePaths: [String]) -> WorkspaceItemLabel {
+  static func make(
+    storedTitle: String,
+    filePaths: [String],
+    titleIsCustom: Bool = false
+  ) -> WorkspaceItemLabel {
     if let path = filePaths.first(where: { !$0.isEmpty }) {
       let name = URL(fileURLWithPath: path).lastPathComponent
       return WorkspaceItemLabel(
-        rowTitle: name.isEmpty ? storedTitle : name,
+        rowTitle: titleIsCustom || name.isEmpty ? storedTitle : name,
         tooltip: path,
         isFile: true
       )
     }
-    if storedTitle.hasPrefix("file://"),
+    if !titleIsCustom, storedTitle.hasPrefix("file://"),
        let url = URL(string: storedTitle),
        !url.lastPathComponent.isEmpty {
       let name = url.lastPathComponent.removingPercentEncoding ?? url.lastPathComponent

@@ -156,14 +156,8 @@ enum WorkspaceItemDragSession {
   }
 }
 
-/// Field editor ownership for `PanelKeyPolicy.defersToLocalEditor`. Integration must add that check.
-final class WorkspaceTagNameField: GlassTextField {
-  static func owns(_ responder: NSResponder?) -> Bool {
-    if responder is WorkspaceTagNameField { return true }
-    if let editor = responder as? NSTextView, editor.delegate is WorkspaceTagNameField { return true }
-    return false
-  }
-}
+/// Create and rename fields. Their editor must own Return and Escape.
+final class WorkspaceTagNameField: GlassTextField {}
 
 final class WorkspaceTagDropButton: NSButton {
   var onMouseDown: (() -> Void)?
@@ -367,7 +361,9 @@ final class WorkspaceTagCreateController {
       self?.dismiss(cancelled: true)
     }
     form.onSizeChange = { [weak self] size in
-      self?.popover?.contentSize = size
+      guard let popover = self?.popover else { return }
+      popover.animates = false
+      popover.contentSize = NSSize(width: WorkspaceTagCreatePlacement.formWidth, height: size.height)
     }
     self.form = form
 
@@ -378,9 +374,11 @@ final class WorkspaceTagCreateController {
     let popover = NSPopover()
     popover.contentViewController = controller
     popover.behavior = .transient
-    popover.animates = true
+    popover.animates = false
     popover.contentSize = form.preferredSize
     popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxX)
+    popover.contentViewController?.view.window?.makeKey()
+    AppState.shared.beginDirectoryForm()
     self.popover = popover
   }
 
@@ -390,6 +388,7 @@ final class WorkspaceTagCreateController {
     }
     onCommit = nil
     onCancel = nil
+    if popover != nil { AppState.shared.endDirectoryForm() }
     popover?.close()
     popover = nil
     form = nil
@@ -420,9 +419,21 @@ final class WorkspaceTagCreateFormView: NSView, NSTextFieldDelegate {
 
   /// 高度跟着内容走；controller 定位时读这个值。
   var preferredSize: CGSize {
-    WorkspaceTagCreatePlacement.formSize(
-      showsError: !errorLabel.isHidden && !errorLabel.stringValue.isEmpty
-    )
+    var size = WorkspaceTagCreatePlacement.formSize(showsError: false)
+    if showsError {
+      size.height += WorkspaceTagCreatePlacement.errorGap + measuredErrorHeight
+    }
+    size.width = WorkspaceTagCreatePlacement.formWidth
+    return size
+  }
+
+  private var showsError: Bool {
+    !errorLabel.isHidden && !errorLabel.stringValue.isEmpty
+  }
+
+  private var measuredErrorHeight: CGFloat {
+    let width = WorkspaceTagCreatePlacement.formWidth - 2 * WorkspaceTagCreatePlacement.contentInset
+    return FormValidation.height(of: errorLabel, width: width)
   }
 
   override var isFlipped: Bool { true }
@@ -447,6 +458,7 @@ final class WorkspaceTagCreateFormView: NSView, NSTextFieldDelegate {
   }
 
   func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+    guard !textView.hasMarkedText() else { return false }
     if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
       onCancel?()
       return true
@@ -464,7 +476,9 @@ final class WorkspaceTagCreateFormView: NSView, NSTextFieldDelegate {
   }
 
   private func updateCreateEnabled() {
-    createButton?.isEnabled = HistoryItem.normalizedTag(field.stringValue) != nil
+    let legal = HistoryItem.normalizedTag(field.stringValue) != nil
+    createButton?.isEnabled = legal
+    createButton?.keyEquivalent = legal ? "\r" : ""
   }
 
   private func build() {
@@ -503,10 +517,9 @@ final class WorkspaceTagCreateFormView: NSView, NSTextFieldDelegate {
     cancelButton = cancel
     retainedTargets = [create, cancel]
 
-    errorLabel.font = .systemFont(ofSize: 11)
+    FormValidation.configure(errorLabel)
     errorLabel.translatesAutoresizingMaskIntoConstraints = false
-    errorLabel.textColor = .systemRed
-    errorLabel.maximumNumberOfLines = 1
+    errorLabel.preferredMaxLayoutWidth = WorkspaceTagCreatePlacement.formWidth - 2 * inset
     errorLabel.isHidden = true
     errorLabel.setAccessibilityIdentifier("lab-rail-new-tag-error")
     addSubview(errorLabel)
@@ -569,7 +582,7 @@ final class WorkspaceTagCreateFormView: NSView, NSTextFieldDelegate {
     if shows {
       bottomWithoutError.isActive = false
       errorTop.constant = WorkspaceTagCreatePlacement.errorGap
-      errorHeight.constant = WorkspaceTagCreatePlacement.errorHeight
+      errorHeight.constant = measuredErrorHeight
       bottomWithError.isActive = true
     } else {
       bottomWithError.isActive = false
@@ -577,16 +590,16 @@ final class WorkspaceTagCreateFormView: NSView, NSTextFieldDelegate {
       errorHeight.constant = 0
       bottomWithoutError.isActive = true
     }
-    layoutSubtreeIfNeeded()
   }
 
   /// 高度变了要让 popover 跟上，否则错误行还按旧尺寸被裁掉。
   private func notifyHeightChanged() {
     let size = preferredSize
+    onSizeChange?(size)
     if frame.size != size {
       setFrameSize(size)
     }
-    onSizeChange?(size)
+    layoutSubtreeIfNeeded()
   }
 
   private func button(
@@ -595,17 +608,229 @@ final class WorkspaceTagCreateFormView: NSView, NSTextFieldDelegate {
     identifier: String,
     action: Selector
   ) -> NSButton {
-    let button = NSButton(title: title, target: self, action: action)
-    button.translatesAutoresizingMaskIntoConstraints = false
-    button.bezelStyle = .rounded
-    button.toolTip = help
-    button.setAccessibilityLabel(title)
-    button.setAccessibilityIdentifier(identifier)
-    return button
+    FormActionButton.makeNative(title: title, help: help, identifier: identifier, target: self, action: action)
   }
 
   @objc private func commit() {
     onCommit?(field.stringValue)
+  }
+
+  @objc private func cancel() {
+    onCancel?()
+  }
+}
+
+/// 新建条目：标题、正文、取消、创建。和「新建标签」同一套弹窗，不写说明。
+final class WorkspaceItemCreateController {
+  private var popover: NSPopover?
+  private var anchor: NSView?
+
+  func present(from anchor: NSView, onCommit: @escaping (String, String) -> String?) {
+    dismiss()
+    guard anchor.window != nil else { return }
+    let form = WorkspaceItemCreateFormView(frame: NSRect(
+      origin: .zero,
+      size: WorkspaceTagCreatePlacement.formSize(fields: 2, showsError: false)
+    ))
+    form.onCancel = { [weak self] in self?.dismiss() }
+    form.onCommit = { [weak self, weak form] title, body in
+      guard let form else { return }
+      if let message = onCommit(title, body) {
+        form.showError(message)
+        self?.resize(form)
+        return
+      }
+      self?.dismiss()
+    }
+    form.onSizeChange = { [weak self, weak form] _ in
+      guard let form else { return }
+      self?.resize(form)
+    }
+    let popover = NSPopover()
+    popover.contentViewController = NSViewController()
+    popover.contentViewController?.view = form
+    popover.behavior = .transient
+    popover.animates = false
+    self.popover = popover
+    self.anchor = anchor
+    popover.contentSize = form.preferredSize
+    popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxX)
+    popover.contentViewController?.view.window?.makeKey()
+    form.window?.makeFirstResponder(form.bodyField)
+    AppState.shared.beginDirectoryForm()
+  }
+
+  private func resize(_ form: WorkspaceItemCreateFormView) {
+    let size = form.preferredSize
+    popover?.contentSize = size
+    form.setFrameSize(size)
+    form.layoutSubtreeIfNeeded()
+  }
+
+  func dismiss() {
+    if popover != nil { AppState.shared.endDirectoryForm() }
+    popover?.close()
+    popover = nil
+    anchor = nil
+  }
+}
+
+final class WorkspaceItemCreateFormView: NSView, NSTextFieldDelegate {
+  var onCommit: ((String, String) -> Void)?
+  var onCancel: (() -> Void)?
+  var onSizeChange: ((CGSize) -> Void)?
+  let titleField = WorkspaceTagNameField(frame: .zero)
+  let bodyField = WorkspaceTagNameField(frame: .zero)
+  private let titleLabel = NSTextField(labelWithString: "")
+  private let errorLabel = NSTextField(labelWithString: "")
+  private var createButton: NSButton?
+  private var retainedTargets: [NSButton] = []
+  private var errorTop: NSLayoutConstraint?
+  private var errorHeight: NSLayoutConstraint?
+  private var bottomWithError: NSLayoutConstraint?
+  private var bottomWithoutError: NSLayoutConstraint?
+
+  var preferredSize: CGSize {
+    var size = WorkspaceTagCreatePlacement.formSize(fields: 2, showsError: false)
+    if !errorLabel.isHidden && !errorLabel.stringValue.isEmpty {
+      size.height += WorkspaceTagCreatePlacement.errorGap + measuredErrorHeight
+    }
+    return size
+  }
+
+  private var measuredErrorHeight: CGFloat {
+    FormValidation.height(
+      of: errorLabel,
+      width: WorkspaceTagCreatePlacement.formWidth - 2 * WorkspaceTagCreatePlacement.contentInset
+    )
+  }
+
+  override var isFlipped: Bool { true }
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    titleLabel.stringValue = NSLocalizedString("create_snippet", comment: "")
+    titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+    titleLabel.translatesAutoresizingMaskIntoConstraints = false
+    addSubview(titleLabel)
+
+    titleField.placeholderString = NSLocalizedString("item_create_title", comment: "")
+    titleField.delegate = self
+    titleField.translatesAutoresizingMaskIntoConstraints = false
+    titleField.setAccessibilityIdentifier("lab-item-create-title")
+    addSubview(titleField)
+
+    bodyField.placeholderString = NSLocalizedString("item_create_body", comment: "")
+    bodyField.delegate = self
+    bodyField.translatesAutoresizingMaskIntoConstraints = false
+    bodyField.setAccessibilityIdentifier("lab-item-create-body")
+    addSubview(bodyField)
+
+    FormValidation.configure(errorLabel)
+    errorLabel.translatesAutoresizingMaskIntoConstraints = false
+    errorLabel.preferredMaxLayoutWidth = WorkspaceTagCreatePlacement.formWidth - 2 * WorkspaceTagCreatePlacement.contentInset
+    errorLabel.isHidden = true
+    errorLabel.setAccessibilityIdentifier("lab-item-create-error")
+    addSubview(errorLabel)
+
+    let cancel = button(
+      title: NSLocalizedString("tag_directory_cancel", comment: ""),
+      help: NSLocalizedString("tag_directory_cancel_help", comment: ""),
+      identifier: "lab-item-create-cancel",
+      action: #selector(cancel)
+    )
+    let create = button(
+      title: NSLocalizedString("tag_directory_create", comment: ""),
+      help: NSLocalizedString("tag_directory_create_help", comment: ""),
+      identifier: "lab-item-create-confirm",
+      action: #selector(commit)
+    )
+    cancel.keyEquivalent = "\u{1b}"
+    create.keyEquivalent = ""
+    create.isEnabled = false
+    createButton = create
+    retainedTargets = [cancel, create]
+    addSubview(cancel)
+    addSubview(create)
+
+    let inset = WorkspaceTagCreatePlacement.contentInset
+    let gap = WorkspaceTagCreatePlacement.titleToField
+    errorTop = errorLabel.topAnchor.constraint(equalTo: create.bottomAnchor, constant: 0)
+    errorHeight = errorLabel.heightAnchor.constraint(equalToConstant: 0)
+    bottomWithError = errorLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset)
+    bottomWithoutError = create.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -inset)
+    NSLayoutConstraint.activate([
+      titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: inset),
+      titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+      titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+      titleLabel.heightAnchor.constraint(equalToConstant: WorkspaceTagCreatePlacement.titleHeight),
+      titleField.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: gap),
+      titleField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+      titleField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+      titleField.heightAnchor.constraint(equalToConstant: WorkspaceTagCreatePlacement.fieldHeight),
+      bodyField.topAnchor.constraint(equalTo: titleField.bottomAnchor, constant: gap),
+      bodyField.leadingAnchor.constraint(equalTo: titleField.leadingAnchor),
+      bodyField.trailingAnchor.constraint(equalTo: titleField.trailingAnchor),
+      bodyField.heightAnchor.constraint(equalToConstant: WorkspaceTagCreatePlacement.fieldHeight),
+      errorLabel.leadingAnchor.constraint(equalTo: titleField.leadingAnchor),
+      errorLabel.trailingAnchor.constraint(equalTo: titleField.trailingAnchor),
+      errorTop!,
+      errorHeight!,
+      bottomWithoutError!,
+      create.topAnchor.constraint(equalTo: bodyField.bottomAnchor, constant: WorkspaceTagCreatePlacement.fieldToButtons),
+      create.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+      create.heightAnchor.constraint(equalToConstant: WorkspaceTagCreatePlacement.buttonHeight),
+      cancel.centerYAnchor.constraint(equalTo: create.centerYAnchor),
+      cancel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+      cancel.trailingAnchor.constraint(equalTo: create.leadingAnchor, constant: -WorkspaceTagCreatePlacement.buttonGap),
+      cancel.widthAnchor.constraint(equalTo: create.widthAnchor),
+      cancel.heightAnchor.constraint(equalTo: create.heightAnchor)
+    ])
+  }
+
+  required init?(coder: NSCoder) { nil }
+
+  func showError(_ message: String) {
+    let shows = !message.isEmpty
+    errorLabel.stringValue = message
+    errorLabel.isHidden = !shows
+    bottomWithoutError?.isActive = false
+    bottomWithError?.isActive = false
+    errorTop?.constant = shows ? WorkspaceTagCreatePlacement.errorGap : 0
+    errorHeight?.constant = shows ? measuredErrorHeight : 0
+    bottomWithError?.isActive = shows
+    bottomWithoutError?.isActive = !shows
+    let size = preferredSize
+    onSizeChange?(size)
+    setFrameSize(size)
+    layoutSubtreeIfNeeded()
+  }
+
+  func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+    guard !textView.hasMarkedText() else { return false }
+    if selector == #selector(NSResponder.cancelOperation(_:)) {
+      cancel()
+      return true
+    }
+    if selector == #selector(NSResponder.insertNewline(_:)) {
+      commit()
+      return true
+    }
+    return false
+  }
+
+  func controlTextDidChange(_ obj: Notification) {
+    let legal = !bodyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    createButton?.isEnabled = legal
+    createButton?.keyEquivalent = legal ? "\r" : ""
+  }
+
+  private func button(title: String, help: String, identifier: String, action: Selector) -> NSButton {
+    FormActionButton.makeNative(title: title, help: help, identifier: identifier, target: self, action: action)
+  }
+
+  @objc private func commit() {
+    onCommit?(titleField.stringValue, bodyField.stringValue)
   }
 
   @objc private func cancel() {
